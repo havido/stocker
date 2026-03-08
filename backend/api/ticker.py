@@ -1,9 +1,14 @@
 from fastapi import APIRouter, HTTPException, status
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from core.cache import get_cache
 from core.database import DatabaseManager
-from tasks import analyze_sentiment_task
+from broker import broker
+from taskiq.kicker import AsyncKicker
+import redis.asyncio as aioredis
 import yfinance as yf
+import os
+import asyncio
 
 router = APIRouter()
 
@@ -20,10 +25,33 @@ async def process_ticker(request: TickerRequest):
     if cached:
         return {"status": "hit", "data": cached}
 
-    # 2. Trigger task
-    task = await analyze_sentiment_task.kiq(ticker)
+    # 2. Trigger task via AsyncKicker (no import of tasks.py needed!)
+    kicker = AsyncKicker(task_name="tasks:analyze_sentiment_task", broker=broker, labels={})
+    task = await kicker.kiq(ticker)
 
     return {"status": "processing", "task_id": task.task_id}
+
+@router.get("/stream/{task_id}")
+async def stream_status(task_id: str):
+    async def event_generator():
+        redis_url = os.environ.get("REDIS_URL", "redis://redis:6379/0")
+        client = await aioredis.from_url(redis_url, decode_responses=True)
+        pubsub = client.pubsub()
+        await pubsub.subscribe(f"logs:{task_id}")
+
+        try:
+            while True:
+                message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
+                if message:
+                    data = message["data"]
+                    yield f"data: {data}\n\n"
+                    if data == "DONE":
+                        break
+        finally:
+            await pubsub.unsubscribe(f"logs:{task_id}")
+            await client.aclose()
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 @router.get("/status/{task_id}")
 async def get_status(task_id: str):

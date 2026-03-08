@@ -1,12 +1,14 @@
+# Combined requirements (for local dev / legacy Dockerfile).
+# For split deployment, use requirements-api.txt or requirements-worker.txt.
 fastapi
 uvicorn[standard]>=0.27
+taskiq
 taskiq-redis
-supabase
-python-dotenv
+redis>=5.0
 pydantic
+python-dotenv
 yfinance>=0.2.36
 requests>=2.31
 beautifulsoup4>=4.12
 transformers>=4.36
 torch>=2.1
-redis>=5.0

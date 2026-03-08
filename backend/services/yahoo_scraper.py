@@ -47,7 +47,7 @@ def _extract_article_text(url: str, timeout: int = 10) -> str:
     return text
 
 
-def scrape_yahoo(ticker: str) -> list[dict]:
+def scrape_yahoo(ticker: str, log_callback=None) -> list[dict]:
     """
     Get news articles for a stock ticker from Yahoo Finance.
 
@@ -59,6 +59,7 @@ def scrape_yahoo(ticker: str) -> list[dict]:
             source, title, url, body
     """
     results = []
+    scraped_count = 0
 
     try:
         search = yf.Search(ticker, news_count=10)
@@ -74,6 +75,11 @@ def scrape_yahoo(ticker: str) -> list[dict]:
             continue
 
         body = _extract_article_text(url)
+
+        if body:
+            scraped_count += 1
+            if log_callback:
+                log_callback(f'{{"step": "yahoo", "message": "Scraped {scraped_count} Yahoo Finance articles for ${ticker}..."}}')
 
         results.append(
             {

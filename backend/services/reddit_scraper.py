@@ -48,7 +48,7 @@ def _get_comments(permalink: str, max_comments: int = 20) -> list[str]:
     return comments
 
 
-def scrape_reddit(ticker: str, limit: int = 10) -> list[dict]:
+def scrape_reddit(ticker: str, limit: int = 10, log_callback=None) -> list[dict]:
     """
     Search Reddit for posts about a stock ticker using public JSON endpoints.
 
@@ -78,6 +78,7 @@ def scrape_reddit(ticker: str, limit: int = 10) -> list[dict]:
 
     posts = data.get("data", {}).get("children", [])
     results = []
+    scraped_count = 0
 
     for post in posts:
         post_data = post.get("data", {})
@@ -87,6 +88,11 @@ def scrape_reddit(ticker: str, limit: int = 10) -> list[dict]:
         time.sleep(1)
 
         comments = _get_comments(permalink)
+
+        scraped_count += 1 + len(comments)
+
+        if log_callback:
+            log_callback(f'{{"step": "reddit", "message": "Scraped {scraped_count} Reddit articles for ${ticker}..."}}')
 
         results.append(
             {

@@ -1,0 +1,9 @@
+# --- API Server Dependencies (lightweight) ---
+fastapi
+uvicorn[standard]>=0.27
+taskiq
+taskiq-redis
+redis>=5.0
+pydantic
+python-dotenv
+yfinance>=0.2.36

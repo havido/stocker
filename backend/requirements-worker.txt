@@ -1,0 +1,10 @@
+# --- Worker Dependencies (heavy ML + scraping) ---
+taskiq
+taskiq[reload]
+taskiq-redis
+redis>=5.0
+requests>=2.31
+beautifulsoup4>=4.12
+transformers>=4.36
+torch>=2.1
+yfinance>=0.2.36
