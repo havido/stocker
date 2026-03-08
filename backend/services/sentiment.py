@@ -124,3 +124,10 @@ def compute_summary(sentiments: list[dict]) -> dict:
         "average_neutral_score": avg_scores["neutral"],
         "verdict": verdict,
     }
+
+class SentimentAnalyzer:
+    def analyze(self, texts: list[str]) -> dict:
+        sentiments = analyze_sentiment(texts)
+        summary = compute_summary(sentiments)
+        return summary
+
