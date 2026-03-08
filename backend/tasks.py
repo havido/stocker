@@ -58,9 +58,14 @@ async def analyze_sentiment_task(ticker: str, context: Context = TaskiqDepends()
     db.publish_log(task_id, f'{{"step": "sentiment", "message": "Starting FinBERT sentiment analysis..."}}')
     score = sentiment.analyze(text, log_callback=log_cb)
 
-    # 4. Save
-    db.publish_log(task_id, f'{{"step": "saving", "message": "Analysis complete. Sending to UI..."}}')
+    # 4. Save to DB (by task_id) AND Cache (by ticker with TTL)
+    db.publish_log(task_id, f'{{"step": "saving", "message": "Analysis complete. Caching results..."}}')
     db.save_analysis(task_id, score)
+
+    from core.cache import CacheManager
+    cache = CacheManager()
+    cache.set(ticker, score)
+
     db.publish_log(task_id, "DONE")
 
     return {"ticker": ticker, "score": score}
