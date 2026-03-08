@@ -24,7 +24,7 @@ export function DashboardHeader({ ticker, onTickerChange, onSearch, onToggleWatc
           <div className="h-8 w-8 rounded-lg bg-primary flex items-center justify-center">
             <span className="text-primary-foreground font-bold text-sm">SP</span>
           </div>
-          <span className="text-lg font-semibold tracking-tight">SentimentPulse</span>
+          <span className="text-lg font-semibold tracking-tight">Stockr</span>
         </div>
       </div>
 
