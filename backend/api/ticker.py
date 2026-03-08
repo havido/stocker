@@ -4,12 +4,18 @@ from pydantic import BaseModel
 from core.cache import get_cache
 from core.database import DatabaseManager
 from tasks import analyze_sentiment_task
+from services.gemini_advisor import get_investment_advice
 import yfinance as yf
 import redis.asyncio as aioredis
 import os
 import asyncio
+from typing import Any
 
 router = APIRouter()
+
+
+class AdviseRequest(BaseModel):
+    sentiment_data: dict[str, Any]
 
 class TickerRequest(BaseModel):
     ticker: str
@@ -100,3 +106,16 @@ async def get_stock_data(ticker: str):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/advise")
+async def get_advice(request: AdviseRequest):
+    """
+    Accept sentiment analysis results and stock data,
+    send them to Gemini, and return the investment recommendation.
+    """
+    try:
+        result = get_investment_advice(request.sentiment_data)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+

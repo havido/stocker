@@ -10,3 +10,4 @@ beautifulsoup4>=4.12
 transformers>=4.36
 torch>=2.1
 redis>=5.0
+google-genai>=1.0
