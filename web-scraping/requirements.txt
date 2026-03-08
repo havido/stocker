@@ -1,0 +1,8 @@
+yfinance>=0.2.36
+requests>=2.31
+beautifulsoup4>=4.12
+transformers>=4.36
+torch>=2.1
+redis>=5.0
+fastapi>=0.110
+uvicorn[standard]>=0.27
