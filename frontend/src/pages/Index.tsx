@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef } from "react";
 import { DashboardHeader } from "@/components/DashboardHeader";
 import { SentimentResults, type SentimentData } from "@/components/SentimentResults";
+import { StockChart, type StockChartData } from "@/components/StockChart";
 import { WatchlistSidebar } from "@/components/WatchlistSidebar";
 import { BarChart3, AlertCircle } from "lucide-react";
 
@@ -14,6 +15,8 @@ const Index = () => {
   const [activeTicker, setActiveTicker] = useState("");
   const [appState, setAppState] = useState<AppState>("idle");
   const [sentimentData, setSentimentData] = useState<SentimentData | null>(null);
+  const [stockData, setStockData] = useState<StockChartData | null>(null);
+  const [stockLoading, setStockLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [watchlistOpen, setWatchlistOpen] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -24,6 +27,22 @@ const Index = () => {
       pollRef.current = null;
     }
   };
+
+  const fetchStockData = useCallback(async (cleanTicker: string) => {
+    setStockLoading(true);
+    setStockData(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/stock/${cleanTicker}`);
+      if (!res.ok) throw new Error(`Stock data fetch failed (${res.status})`);
+      const data = await res.json();
+      setStockData(data);
+    } catch {
+      // Stock data failing shouldn't block sentiment — just silently leave chart empty
+      setStockData(null);
+    } finally {
+      setStockLoading(false);
+    }
+  }, []);
 
   const pollForResult = useCallback((taskId: string) => {
     stopPolling();
@@ -52,62 +71,26 @@ const Index = () => {
     }, POLL_INTERVAL_MS);
   }, []);
 
-  const handleSearch = useCallback(async () => {
-    const cleanTicker = ticker.replace("$", "").trim();
-    if (!cleanTicker) return;
+  const startSearch = useCallback(
+    async (cleanTicker: string) => {
+      stopPolling();
+      setActiveTicker(cleanTicker);
+      setSentimentData(null);
+      setError(null);
+      setAppState("loading");
 
-    stopPolling();
-    setActiveTicker(cleanTicker);
-    setSentimentData(null);
-    setError(null);
-    setAppState("loading");
+      // Fetch stock price data immediately (fast) in parallel with sentiment
+      fetchStockData(cleanTicker);
 
-    try {
-      const res = await fetch(`${API_BASE}/api/ticker`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ticker: cleanTicker }),
-      });
-      if (!res.ok) throw new Error(`Request failed (${res.status})`);
-      const data = await res.json();
-
-      if (data.status === "hit" && data.data) {
-        setSentimentData(data.data);
-        setAppState("completed");
-      } else if (data.task_id) {
-        pollForResult(data.task_id);
-      } else {
-        throw new Error("No task ID returned from server");
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to start analysis");
-      setAppState("error");
-    }
-  }, [ticker, pollForResult]);
-
-  const handleSelectTicker = (t: string) => {
-    setTicker(t);
-    setWatchlistOpen(false);
-    // Trigger search for selected ticker
-    const cleanTicker = t.replace("$", "").trim();
-    if (!cleanTicker) return;
-
-    stopPolling();
-    setActiveTicker(cleanTicker);
-    setSentimentData(null);
-    setError(null);
-    setAppState("loading");
-
-    fetch(`${API_BASE}/api/ticker`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ticker: cleanTicker }),
-    })
-      .then((res) => {
+      try {
+        const res = await fetch(`${API_BASE}/api/ticker`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ticker: cleanTicker }),
+        });
         if (!res.ok) throw new Error(`Request failed (${res.status})`);
-        return res.json();
-      })
-      .then((data) => {
+        const data = await res.json();
+
         if (data.status === "hit" && data.data) {
           setSentimentData(data.data);
           setAppState("completed");
@@ -116,12 +99,32 @@ const Index = () => {
         } else {
           throw new Error("No task ID returned from server");
         }
-      })
-      .catch((err) => {
+      } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to start analysis");
         setAppState("error");
-      });
-  };
+      }
+    },
+    [fetchStockData, pollForResult]
+  );
+
+  const handleSearch = useCallback(async () => {
+    const cleanTicker = ticker.replace("$", "").trim().toUpperCase();
+    if (!cleanTicker) return;
+    await startSearch(cleanTicker);
+  }, [ticker, startSearch]);
+
+  const handleSelectTicker = useCallback(
+    (t: string) => {
+      const cleanTicker = t.replace("$", "").trim().toUpperCase();
+      if (!cleanTicker) return;
+      setTicker(cleanTicker);
+      setWatchlistOpen(false);
+      startSearch(cleanTicker);
+    },
+    [startSearch]
+  );
+
+  const showResults = appState !== "idle";
 
   return (
     <div className="min-h-screen bg-background">
@@ -133,26 +136,7 @@ const Index = () => {
         loading={appState === "loading"}
       />
 
-      <main className="max-w-5xl mx-auto px-4 sm:px-6 py-6 space-y-6">
-        {/* Scanning state banner */}
-        {appState === "loading" && (
-          <div className="flex items-center gap-3 rounded-lg bg-primary/5 border border-primary/20 px-4 py-3 animate-in fade-in duration-300">
-            <div className="h-4 w-4 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-            <span className="text-sm font-medium text-primary">
-              Scanning &amp; Analyzing <span className="font-bold">${activeTicker}</span>
-              <span className="text-muted-foreground ml-2 text-xs">This may take a moment...</span>
-            </span>
-          </div>
-        )}
-
-        {/* Error state */}
-        {appState === "error" && error && (
-          <div className="flex items-center gap-3 rounded-lg bg-negative/5 border border-negative/20 px-4 py-3 animate-in fade-in duration-300">
-            <AlertCircle className="h-4 w-4 text-negative flex-shrink-0" />
-            <span className="text-sm font-medium text-negative">{error}</span>
-          </div>
-        )}
-
+      <main className="max-w-[1400px] mx-auto px-4 sm:px-6 py-6 space-y-6">
         {/* Idle state — empty prompt */}
         {appState === "idle" && (
           <div className="flex flex-col items-center justify-center py-24 text-center animate-in fade-in duration-500">
@@ -161,7 +145,8 @@ const Index = () => {
             </div>
             <h2 className="text-2xl font-bold mb-2">Stock Sentiment Analyzer</h2>
             <p className="text-muted-foreground max-w-md mb-6">
-              Enter a stock ticker above to analyze sentiment from Reddit and news sources using FinBERT AI.
+              Enter a stock ticker above to see the price chart and analyze sentiment from Reddit
+              and news sources using FinBERT AI.
             </p>
             <div className="flex gap-2">
               {["AAPL", "TSLA", "NVDA", "MSFT"].map((t) => (
@@ -180,9 +165,44 @@ const Index = () => {
           </div>
         )}
 
-        {/* Results */}
-        {appState === "completed" && sentimentData && (
-          <SentimentResults data={sentimentData} ticker={activeTicker} />
+        {/* Side-by-side results layout */}
+        {showResults && (
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 animate-in fade-in duration-300">
+            {/* Left — Stock Chart */}
+            <div>
+              <StockChart data={stockData} loading={stockLoading} />
+            </div>
+
+            {/* Right — Sentiment Panel */}
+            <div className="space-y-4">
+              {/* Scanning banner */}
+              {appState === "loading" && (
+                <div className="flex items-center gap-3 rounded-lg bg-primary/5 border border-primary/20 px-4 py-3">
+                  <div className="h-4 w-4 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                  <span className="text-sm font-medium text-primary">
+                    Scanning &amp; Analyzing{" "}
+                    <span className="font-bold">${activeTicker}</span>
+                    <span className="text-muted-foreground ml-2 text-xs">
+                      This may take a moment...
+                    </span>
+                  </span>
+                </div>
+              )}
+
+              {/* Error state */}
+              {appState === "error" && error && (
+                <div className="flex items-center gap-3 rounded-lg bg-negative/5 border border-negative/20 px-4 py-3">
+                  <AlertCircle className="h-4 w-4 text-negative flex-shrink-0" />
+                  <span className="text-sm font-medium text-negative">{error}</span>
+                </div>
+              )}
+
+              {/* Sentiment results */}
+              {appState === "completed" && sentimentData && (
+                <SentimentResults data={sentimentData} ticker={activeTicker} />
+              )}
+            </div>
+          </div>
         )}
       </main>
 
