@@ -9,11 +9,31 @@ Usage:
 
 import json
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+from typing import Optional
+
+import redis
 
 from reddit_scraper import scrape_reddit
 from yahoo_scraper import scrape_yahoo
 from sentiment import analyze_sentiment, compute_summary
+
+# ---------------------------------------------------------------------------
+# Redis cache — connects to the local Redis server (started via `brew services
+# start redis`). decode_responses=True means Redis returns normal str instead
+# of raw bytes so we can use them directly.
+# ---------------------------------------------------------------------------
+_cache: Optional[redis.Redis] = None
+try:
+    _cache = redis.Redis(host="localhost", port=6379, db=0, decode_responses=True)
+    _cache.ping()  # fail fast if Redis isn't running
+    CACHE_AVAILABLE = True
+except redis.exceptions.ConnectionError:
+    print("[WARNING] Redis not reachable — caching disabled. Run: brew services start redis")
+    _cache = None
+    CACHE_AVAILABLE = False
+
+CACHE_TTL = timedelta(hours=1)  # cached results expire after 1 hour
 
 
 DEFAULT_TICKERS = ["NVDA", "TSLA", "AAPL", "GME", "PLTR", "META", "MSFT", "GOOGL", "AMZN"]
@@ -23,11 +43,27 @@ def analyze_ticker(ticker: str) -> dict:
     """
     Run the full scrape → sentiment pipeline for a single ticker.
 
+    Results are cached in Redis for CACHE_TTL (1 hour) to avoid
+    re-running the expensive FinBERT model on the same ticker.
+
     Returns a dict ready for JSON serialization.
     """
     ticker = ticker.upper()
+    cache_key = f"stock_sentiment:{ticker}"
+
+    # ------------------------------------------------------------------ #
+    # 1. Cache check — return immediately if we have a fresh result        #
+    # ------------------------------------------------------------------ #
+    if CACHE_AVAILABLE:
+        cached = _cache.get(cache_key)
+        if cached:
+            print(f"\n{'='*60}")
+            print(f"  [CACHE HIT]  {ticker} — returning saved result")
+            print(f"{'='*60}")
+            return json.loads(cached)
+
     print(f"\n{'='*60}")
-    print(f"  Analyzing: {ticker}")
+    print(f"  [CACHE MISS] Analyzing: {ticker}")
     print(f"{'='*60}")
 
     # --- Reddit ---
@@ -127,6 +163,13 @@ def analyze_ticker(ticker: str) -> dict:
         },
         "overall": overall,
     }
+
+    # ------------------------------------------------------------------ #
+    # 2. Cache write — save the result so the next call is instant        #
+    # ------------------------------------------------------------------ #
+    if CACHE_AVAILABLE:
+        _cache.setex(name=cache_key, time=CACHE_TTL, value=json.dumps(result))
+        print(f"  ✓ Cached result for {ticker} (expires in {int(CACHE_TTL.total_seconds()//60)} min)")
 
     print(f"  ✓ Verdict: {overall['verdict'].upper()}")
     return result

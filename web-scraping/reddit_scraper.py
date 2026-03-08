@@ -1,40 +1,56 @@
 """
-Reddit scraper using PRAW.
+Reddit scraper using public JSON endpoints.
 
-Searches r/all for posts mentioning a stock ticker,
-collects titles, selftext, and top-level comments.
+No API keys required — uses reddit.com/search.json to find posts
+and fetches comments via the post's .json endpoint.
 """
 
-import os
-import praw
-from dotenv import load_dotenv
-
-load_dotenv()
+import time
+import requests
 
 
-def _get_reddit_client() -> praw.Reddit:
-    """Create and return an authenticated Reddit client."""
-    client_id = os.getenv("REDDIT_CLIENT_ID")
-    client_secret = os.getenv("REDDIT_CLIENT_SECRET")
-    user_agent = os.getenv("REDDIT_USER_AGENT", "stocker/1.0")
+_HEADERS = {
+    "User-Agent": "stocker/1.0 (stock sentiment scraper)"
+}
 
-    if not client_id or not client_secret:
-        raise EnvironmentError(
-            "Missing Reddit API credentials. "
-            "Set REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET in your .env file. "
-            "Create an app at https://www.reddit.com/prefs/apps"
-        )
+_BASE_SEARCH_URL = "https://www.reddit.com/search.json"
 
-    return praw.Reddit(
-        client_id=client_id,
-        client_secret=client_secret,
-        user_agent=user_agent,
-    )
+
+def _get_comments(permalink: str, max_comments: int = 20) -> list[str]:
+    """
+    Fetch top-level comments for a post using its JSON endpoint.
+
+    Args:
+        permalink: The post's permalink (e.g. /r/stocks/comments/abc123/...).
+        max_comments: Max number of comments to return.
+
+    Returns:
+        List of comment body strings.
+    """
+    url = f"https://www.reddit.com{permalink}.json"
+    try:
+        resp = requests.get(url, headers=_HEADERS, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+    except (requests.RequestException, ValueError):
+        return []
+
+    comments = []
+    # Reddit returns [post_listing, comments_listing]
+    if isinstance(data, list) and len(data) > 1:
+        comment_listing = data[1].get("data", {}).get("children", [])
+        for child in comment_listing[:max_comments]:
+            if child.get("kind") == "t1":  # t1 = comment
+                body = child.get("data", {}).get("body", "")
+                if body:
+                    comments.append(body)
+
+    return comments
 
 
 def scrape_reddit(ticker: str, limit: int = 10) -> list[dict]:
     """
-    Search Reddit for posts about a stock ticker.
+    Search Reddit for posts about a stock ticker using public JSON endpoints.
 
     Args:
         ticker: Stock ticker symbol (e.g. "NVDA").
@@ -44,30 +60,42 @@ def scrape_reddit(ticker: str, limit: int = 10) -> list[dict]:
         List of dicts with keys:
             source, title, selftext, comments, url, score
     """
-    reddit = _get_reddit_client()
+    params = {
+        "q": ticker,
+        "sort": "relevance",
+        "t": "day",
+        "limit": limit,
+        "type": "link",
+    }
+
+    try:
+        resp = requests.get(_BASE_SEARCH_URL, headers=_HEADERS, params=params, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+    except (requests.RequestException, ValueError) as e:
+        print(f"        Reddit search request failed: {e}")
+        return []
+
+    posts = data.get("data", {}).get("children", [])
     results = []
 
-    submissions = reddit.subreddit("all").search(
-        ticker, time_filter="day", limit=limit
-    )
+    for post in posts:
+        post_data = post.get("data", {})
+        permalink = post_data.get("permalink", "")
 
-    for submission in submissions:
-        # Only grab existing top-level comments — don't load "more comments"
-        submission.comments.replace_more(limit=0)
-        top_comments = [
-            comment.body
-            for comment in submission.comments.list()[:20]  # cap at 20 comments
-            if hasattr(comment, "body")
-        ]
+        # Rate limit: Reddit public endpoints throttle aggressively
+        time.sleep(1)
+
+        comments = _get_comments(permalink)
 
         results.append(
             {
                 "source": "reddit",
-                "title": submission.title,
-                "selftext": submission.selftext or "",
-                "comments": top_comments,
-                "url": f"https://reddit.com{submission.permalink}",
-                "score": submission.score,
+                "title": post_data.get("title", ""),
+                "selftext": post_data.get("selftext", ""),
+                "comments": comments,
+                "url": f"https://reddit.com{permalink}",
+                "score": post_data.get("score", 0),
             }
         )
 
