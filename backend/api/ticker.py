@@ -1,9 +1,13 @@
 from fastapi import APIRouter, HTTPException, status
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from core.cache import get_cache
 from core.database import DatabaseManager
 from tasks import analyze_sentiment_task
 import yfinance as yf
+import redis.asyncio as aioredis
+import os
+import asyncio
 
 router = APIRouter()
 
@@ -24,6 +28,28 @@ async def process_ticker(request: TickerRequest):
     task = await analyze_sentiment_task.kiq(ticker)
 
     return {"status": "processing", "task_id": task.task_id}
+
+@router.get("/stream/{task_id}")
+async def stream_status(task_id: str):
+    async def event_generator():
+        redis_url = os.environ.get("REDIS_URL", "redis://redis:6379/0")
+        client = await aioredis.from_url(redis_url, decode_responses=True)
+        pubsub = client.pubsub()
+        await pubsub.subscribe(f"logs:{task_id}")
+        
+        try:
+            while True:
+                message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
+                if message:
+                    data = message["data"]
+                    yield f"data: {data}\n\n"
+                    if data == "DONE":
+                        break
+        finally:
+            await pubsub.unsubscribe(f"logs:{task_id}")
+            await client.aclose()
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 @router.get("/status/{task_id}")
 async def get_status(task_id: str):

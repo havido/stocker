@@ -24,7 +24,7 @@ def _load_model():
     return _tokenizer, _model
 
 
-def analyze_sentiment(texts: list[str]) -> list[dict]:
+def analyze_sentiment(texts: list[str], log_callback=None) -> list[dict]:
     """
     Run FinBERT sentiment analysis on a list of texts.
 
@@ -42,7 +42,12 @@ def analyze_sentiment(texts: list[str]) -> list[dict]:
 
     # Process in batches of 16 to manage memory
     batch_size = 16
+    total_batches = (len(texts) + batch_size - 1) // batch_size
     for i in range(0, len(texts), batch_size):
+        batch_num = (i // batch_size) + 1
+        if log_callback:
+            log_callback(f'{{"step": "sentiment", "message": "Analyzing sentiment batch {batch_num} of {total_batches}..."}}')
+            
         batch = texts[i : i + batch_size]
 
         # Filter out empty strings
@@ -126,8 +131,8 @@ def compute_summary(sentiments: list[dict]) -> dict:
     }
 
 class SentimentAnalyzer:
-    def analyze(self, texts: list[str]) -> dict:
-        sentiments = analyze_sentiment(texts)
+    def analyze(self, texts: list[str], log_callback=None) -> dict:
+        sentiments = analyze_sentiment(texts, log_callback)
         summary = compute_summary(sentiments)
         return summary
 

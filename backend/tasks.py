@@ -15,14 +15,44 @@ async def analyze_sentiment_task(ticker: str, context: Context = TaskiqDepends()
     sentiment = SentimentAnalyzer()
     db = DatabaseManager()
     
-    # 1. Scrape
-    text = await scraper.fetch_data(ticker)
+    task_id = context.message.task_id
+
+    def log_cb(msg):
+        db.publish_log(task_id, msg)
+
+    # 1. Scrape Reddit
+    db.publish_log(task_id, f'{{"step": "reddit", "message": "Scraping Reddit for {ticker}..."}}')
+    from services.reddit_scraper import scrape_reddit
+    reddit_posts = scrape_reddit(ticker, log_callback=log_cb)
     
-    # 2. Analyze
-    score = sentiment.analyze(text)
+    # 2. Scrape Yahoo
+    db.publish_log(task_id, f'{{"step": "yahoo", "message": "Scraping Yahoo Finance for {ticker}..."}}')
+    from services.yahoo_scraper import scrape_yahoo
+    yahoo_articles = scrape_yahoo(ticker, log_callback=log_cb)
     
-    # 3. Save
-    db.save_analysis(context.message.task_id, score)
+    # Collect texts
+    texts = []
+    for post in reddit_posts:
+        combined = f"{post.get('title', '')}. {post.get('selftext', '')}".strip()
+        if combined:
+            texts.append(combined)
+        texts.extend([c for c in post.get("comments", []) if c.strip()])
+        
+    for article in yahoo_articles:
+        combined = f"{article.get('title', '')}. {article.get('body', '')}".strip()
+        if combined:
+            texts.append(combined)
+            
+    text = [t for t in texts if t]
+    
+    # 3. Analyze
+    db.publish_log(task_id, f'{{"step": "sentiment", "message": "Starting FinBERT sentiment analysis..."}}')
+    score = sentiment.analyze(text, log_callback=log_cb)
+    
+    # 4. Save
+    db.publish_log(task_id, f'{{"step": "saving", "message": "Analysis complete. Sending to UI..."}}')
+    db.save_analysis(task_id, score)
+    db.publish_log(task_id, "DONE")
     
     return {"ticker": ticker, "score": score}
 
