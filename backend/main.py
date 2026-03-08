@@ -17,3 +17,7 @@ app.include_router(ticker.router, prefix="/api")
 @app.get("/")
 def read_root():
     return {"message": "Welcome to Stock Sentiment Analysis API"}
+
+@app.get("/health")
+def healthcheck():
+    return {"status": "ok"}
