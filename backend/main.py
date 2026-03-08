@@ -37,10 +37,13 @@ app.add_middleware(
 app.include_router(ticker.router, prefix="/api")
 
 @app.get("/")
+@app.head("/")
 def read_root():
     return {"message": "Welcome to Stock Sentiment Analysis API"}
 
 @app.get("/health")
+@app.head("/health")
 def healthcheck():
     return {"status": "ok"}
+
 
