@@ -19,12 +19,18 @@ const Index = () => {
   const [stockLoading, setStockLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [watchlistOpen, setWatchlistOpen] = useState(false);
+  const [logs, setLogs] = useState<{ step: string, message: string }[]>([]);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const streamRef = useRef<EventSource | null>(null);
 
   const stopPolling = () => {
     if (pollRef.current) {
       clearInterval(pollRef.current);
       pollRef.current = null;
+    }
+    if (streamRef.current) {
+      streamRef.current.close();
+      streamRef.current = null;
     }
   };
 
@@ -37,38 +43,61 @@ const Index = () => {
       const data = await res.json();
       setStockData(data);
     } catch {
-      // Stock data failing shouldn't block sentiment — just silently leave chart empty
       setStockData(null);
     } finally {
       setStockLoading(false);
     }
   }, []);
 
-  const pollForResult = useCallback((taskId: string) => {
+  const streamForResult = useCallback((taskId: string) => {
     stopPolling();
 
-    pollRef.current = setInterval(async () => {
-      try {
-        const res = await fetch(`${API_BASE}/api/status/${taskId}`);
-        if (!res.ok) throw new Error(`Status check failed (${res.status})`);
-        const data = await res.json();
+    const es = new EventSource(`${API_BASE}/api/stream/${taskId}`);
+    streamRef.current = es;
 
-        if (data.status === "completed") {
-          stopPolling();
-          setSentimentData(data.result);
-          setAppState("completed");
-        } else if (data.status === "failed") {
-          stopPolling();
-          setError(data.error || "Analysis failed. Please try again.");
+    es.onmessage = async (event) => {
+      if (event.data === "DONE") {
+        es.close();
+        streamRef.current = null;
+
+        // Fetch the final result
+        try {
+          const res = await fetch(`${API_BASE}/api/status/${taskId}`);
+          const data = await res.json();
+          if (data.status === "completed") {
+            setSentimentData(data.result);
+            setAppState("completed");
+            setLogs([]); // Clear logs when done
+          } else {
+            setError("Analysis failed. Please try again.");
+            setAppState("error");
+          }
+        } catch (err) {
+          setError("Failed to fetch final results");
           setAppState("error");
         }
-        // If still "processing", keep polling
-      } catch (err) {
-        stopPolling();
-        setError(err instanceof Error ? err.message : "Something went wrong");
-        setAppState("error");
+      } else {
+        // new log
+        try {
+          const parsed = JSON.parse(event.data);
+          if (parsed && parsed.step && parsed.message) {
+            setLogs((prev) => {
+              const filtered = prev.filter(l => l.step !== parsed.step);
+              return [...filtered, parsed];
+            });
+          }
+        } catch (e) {
+          console.warn("Unparseable log", event.data);
+        }
       }
-    }, POLL_INTERVAL_MS);
+    };
+
+    es.onerror = (err) => {
+      es.close();
+      streamRef.current = null;
+      setError("Stream connection lost");
+      setAppState("error");
+    };
   }, []);
 
   const startSearch = useCallback(
@@ -77,9 +106,9 @@ const Index = () => {
       setActiveTicker(cleanTicker);
       setSentimentData(null);
       setError(null);
+      setLogs([]);
       setAppState("loading");
 
-      // Fetch stock price data immediately (fast) in parallel with sentiment
       fetchStockData(cleanTicker);
 
       try {
@@ -95,7 +124,7 @@ const Index = () => {
           setSentimentData(data.data);
           setAppState("completed");
         } else if (data.task_id) {
-          pollForResult(data.task_id);
+          streamForResult(data.task_id);
         } else {
           throw new Error("No task ID returned from server");
         }
@@ -104,7 +133,7 @@ const Index = () => {
         setAppState("error");
       }
     },
-    [fetchStockData, pollForResult]
+    [fetchStockData, streamForResult]
   );
 
   const handleSearch = useCallback(async () => {
@@ -177,15 +206,27 @@ const Index = () => {
             <div className="space-y-4">
               {/* Scanning banner */}
               {appState === "loading" && (
-                <div className="flex items-center gap-3 rounded-lg bg-primary/5 border border-primary/20 px-4 py-3">
-                  <div className="h-4 w-4 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-                  <span className="text-sm font-medium text-primary">
-                    Scanning &amp; Analyzing{" "}
-                    <span className="font-bold">${activeTicker}</span>
-                    <span className="text-muted-foreground ml-2 text-xs">
-                      This may take a moment...
+                <div className="flex flex-col gap-3 rounded-lg bg-primary/5 border border-primary/20 px-4 py-3">
+                  <div className="flex items-center gap-3">
+                    <div className="h-4 w-4 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                    <span className="text-sm font-medium text-primary">
+                      Scanning &amp; Analyzing{" "}
+                      <span className="font-bold">${activeTicker}</span>
+                      <span className="text-muted-foreground ml-2 text-xs">
+                        This may take a moment...
+                      </span>
                     </span>
-                  </span>
+                  </div>
+                  {/* Logs stream */}
+                  {logs.length > 0 && (
+                    <div className="flex flex-col gap-1 border-t border-primary/10 pt-2 w-full">
+                      {logs.map((log) => (
+                        <span key={log.step} className="text-xs text-gray-500 animate-in fade-in duration-300">
+                          {log.message}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
 

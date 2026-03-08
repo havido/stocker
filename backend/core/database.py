@@ -16,3 +16,6 @@ class DatabaseManager:
         if val:
             return json.loads(val)
         return None
+
+    def publish_log(self, identifier: str, message: str):
+        self.client.publish(f"logs:{identifier}", message)
