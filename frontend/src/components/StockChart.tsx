@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
-import { TrendingUp, TrendingDown } from "lucide-react";
+import { TrendingUp, TrendingDown, AlertCircle, RefreshCw } from "lucide-react";
 
 export interface PricePoint {
   time: string;
@@ -21,9 +21,11 @@ const PERIODS = ["1D", "1W", "1M", "1Y", "ALL"] as const;
 interface StockChartProps {
   data: StockChartData | null;
   loading: boolean;
+  error?: string | null;
+  onRetry?: () => void;
 }
 
-export function StockChart({ data, loading }: StockChartProps) {
+export function StockChart({ data, loading, error, onRetry }: StockChartProps) {
   const [period, setPeriod] = useState<string>("1D");
 
   const chartData: PricePoint[] = data?.history[period] ?? [];
@@ -40,6 +42,27 @@ export function StockChart({ data, loading }: StockChartProps) {
             <div key={p} className="h-8 w-12 bg-muted rounded" />
           ))}
         </div>
+      </div>
+    );
+  }
+
+  if (error && !data) {
+    return (
+      <div className="rounded-xl border border-border bg-card p-6 flex flex-col items-center justify-center text-center gap-3 min-h-[360px]">
+        <div className="h-12 w-12 rounded-xl bg-muted/50 flex items-center justify-center">
+          <AlertCircle className="h-6 w-6 text-muted-foreground" />
+        </div>
+        <p className="text-sm font-medium">Couldn't load the chart</p>
+        <p className="text-xs text-muted-foreground max-w-xs">{error}</p>
+        {onRetry && (
+          <button
+            onClick={onRetry}
+            className="mt-1 inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-secondary text-muted-foreground hover:text-foreground transition-all"
+          >
+            <RefreshCw className="h-3.5 w-3.5" />
+            Retry
+          </button>
+        )}
       </div>
     );
   }

@@ -7,6 +7,7 @@ import { WatchlistSidebar } from "@/components/WatchlistSidebar";
 import { AISummary } from "@/components/AISummary";
 import { BarChart3, AlertCircle } from "lucide-react";
 import { API_BASE } from "@/lib/api";
+import { normalizeTicker, isValidTickerShape } from "@/lib/ticker";
 
 type AppState = "idle" | "loading" | "completed" | "error";
 
@@ -18,6 +19,7 @@ const Index = () => {
   const [sentimentData, setSentimentData] = useState<SentimentData | null>(null);
   const [stockData, setStockData] = useState<StockChartData | null>(null);
   const [stockLoading, setStockLoading] = useState(false);
+  const [stockError, setStockError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [watchlistOpen, setWatchlistOpen] = useState(false);
   const [logs, setLogs] = useState<{ step: string; message: string }[]>([]);
@@ -34,13 +36,18 @@ const Index = () => {
   const fetchStockData = useCallback(async (cleanTicker: string) => {
     setStockLoading(true);
     setStockData(null);
+    setStockError(null);
     try {
       const res = await fetch(`${API_BASE}/v1/stocks/${cleanTicker}/chart`);
-      if (!res.ok) throw new Error(`Stock data fetch failed (${res.status})`);
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.detail || `Couldn't load market data (${res.status})`);
+      }
       const data = await res.json();
       setStockData(data);
-    } catch {
+    } catch (err) {
       setStockData(null);
+      setStockError(err instanceof Error ? err.message : "Couldn't load market data");
     } finally {
       setStockLoading(false);
     }
@@ -52,6 +59,17 @@ const Index = () => {
     const es = new EventSource(`${API_BASE}/v1/analysis/jobs/${taskId}/stream`);
     streamRef.current = es;
 
+    // Captured from "error"/"timeout" log lines so the terminal ERROR sentinel
+    // can show a meaningful reason rather than a generic message.
+    let failureMessage = "";
+
+    const fail = (message: string) => {
+      es.close();
+      streamRef.current = null;
+      setError(message);
+      setAppState("error");
+    };
+
     es.onmessage = async (event) => {
       if (event.data === "DONE") {
         es.close();
@@ -59,7 +77,7 @@ const Index = () => {
 
         // Fetch the final result
         try {
-          const res = await fetch(`${API_BASE}/api/status/${taskId}`);
+          const res = await fetch(`${API_BASE}/v1/analysis/jobs/${taskId}`);
           const data = await res.json();
           if (data.status === "completed") {
             setSentimentData(data.result);
@@ -67,33 +85,42 @@ const Index = () => {
             setAppState("completed");
             setLogs([]);
           } else {
-            setError("Analysis failed. Please try again.");
-            setAppState("error");
+            fail("Analysis finished but no result was returned. Please try again.");
           }
         } catch {
-          setError("Failed to fetch final results");
-          setAppState("error");
+          fail("Failed to fetch final results");
         }
-      } else {
-        try {
-          const parsed = JSON.parse(event.data);
-          if (parsed && parsed.step && parsed.message) {
-            setLogs((prev) => {
-              const filtered = prev.filter((l) => l.step !== parsed.step);
-              return [...filtered, parsed];
-            });
-          }
-        } catch {
-          console.warn("Unparseable log", event.data);
+        return;
+      }
+
+      if (event.data === "ERROR") {
+        // Terminal failure from the worker (or stream timeout).
+        fail(failureMessage || "Analysis failed. Please try again.");
+        return;
+      }
+
+      try {
+        const parsed = JSON.parse(event.data);
+        if (parsed && (parsed.step === "error" || parsed.step === "timeout")) {
+          // Remember the reason; the ERROR sentinel will follow and end the stream.
+          failureMessage = parsed.message || failureMessage;
+        } else if (parsed && parsed.step && parsed.message) {
+          setLogs((prev) => {
+            const filtered = prev.filter((l) => l.step !== parsed.step);
+            return [...filtered, parsed];
+          });
         }
+      } catch {
+        console.warn("Unparseable log", event.data);
       }
     };
 
     es.onerror = () => {
       es.close();
       streamRef.current = null;
-      setError("Stream connection lost");
-      setAppState("error");
+      // Only surface a connection error if we weren't already done.
+      setAppState((s) => (s === "completed" ? s : "error"));
+      setError((e) => e || "Connection to the analysis stream was lost");
     };
   }, []);
 
@@ -115,7 +142,11 @@ const Index = () => {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ ticker: cleanTicker }),
         });
-        if (!res.ok) throw new Error(`Request failed (${res.status})`);
+        if (!res.ok) {
+          // Surface the server's message (e.g. "'ASDFGH' is not a recognized ticker")
+          const body = await res.json().catch(() => null);
+          throw new Error(body?.detail || `Request failed (${res.status})`);
+        }
         const data = await res.json();
 
         if (data.status === "hit" && data.data) {
@@ -136,14 +167,22 @@ const Index = () => {
   );
 
   const handleSearch = useCallback(async () => {
-    const cleanTicker = ticker.replace("$", "").trim().toUpperCase();
+    const cleanTicker = normalizeTicker(ticker);
     if (!cleanTicker) return;
+    // Block obviously-malformed input before the round-trip; the backend still
+    // does the authoritative existence check.
+    if (!isValidTickerShape(cleanTicker)) {
+      setActiveTicker(cleanTicker);
+      setError(`'${cleanTicker}' is not a valid ticker symbol`);
+      setAppState("error");
+      return;
+    }
     await startSearch(cleanTicker);
   }, [ticker, startSearch]);
 
   const handleSelectTicker = useCallback(
     (t: string) => {
-      const cleanTicker = t.replace("$", "").trim().toUpperCase();
+      const cleanTicker = normalizeTicker(t);
       if (!cleanTicker) return;
       setTicker(cleanTicker);
       setWatchlistOpen(false);
@@ -210,7 +249,12 @@ const Index = () => {
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 animate-in fade-in duration-300">
             {/* Left — Stock Chart */}
             <div>
-              <StockChart data={stockData} loading={stockLoading} />
+              <StockChart
+                data={stockData}
+                loading={stockLoading}
+                error={stockError}
+                onRetry={() => activeTicker && fetchStockData(activeTicker)}
+              />
             </div>
 
             {/* Right — Sentiment Panel */}
@@ -249,13 +293,29 @@ const Index = () => {
                 </div>
               )}
 
+              {/* Completed with no articles — explicit empty state */}
+              {appState === "completed" &&
+                sentimentData &&
+                sentimentData.positive + sentimentData.negative + sentimentData.neutral === 0 && (
+                  <div className="flex items-center gap-3 rounded-lg bg-neutral/5 border border-neutral/20 px-4 py-3">
+                    <AlertCircle className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                    <span className="text-sm font-medium text-muted-foreground">
+                      No recent articles found for{" "}
+                      <span className="font-bold">${activeTicker}</span>. Try again later or
+                      pick another ticker.
+                    </span>
+                  </div>
+                )}
+
               {/* Sentiment results + AI Summary */}
-              {appState === "completed" && sentimentData && (
-                <>
-                  <SentimentResults data={sentimentData} ticker={activeTicker} />
-                  {aiSummary && <AISummary summary={aiSummary} ticker={activeTicker} />}
-                </>
-              )}
+              {appState === "completed" &&
+                sentimentData &&
+                sentimentData.positive + sentimentData.negative + sentimentData.neutral > 0 && (
+                  <>
+                    <SentimentResults data={sentimentData} ticker={activeTicker} />
+                    {aiSummary && <AISummary summary={aiSummary} ticker={activeTicker} />}
+                  </>
+                )}
             </div>
           </div>
         )}
