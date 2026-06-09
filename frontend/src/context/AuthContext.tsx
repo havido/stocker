@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState, useCallback, type ReactNode } from "react";
 import { apiPost, setToken, clearToken, TOKEN_KEY } from "@/lib/api";
+import { decodeJwt } from "@/lib/jwt";
 
 interface User {
   id: string;
@@ -31,8 +32,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [token, setTokenState] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Restore session from localStorage on mount
+  // On mount: handle a Supabase auth callback, else restore an existing session.
   useEffect(() => {
+    // Email-confirmation / magic-link callbacks return the session in the URL
+    // hash (implicit flow): #access_token=...&refresh_token=...&type=signup.
+    // Establish the session from it, then strip the hash from the URL.
+    const hash = window.location.hash;
+    if (hash && hash.includes("access_token=")) {
+      const params = new URLSearchParams(hash.slice(1));
+      const accessToken = params.get("access_token");
+      if (accessToken) {
+        const claims = decodeJwt(accessToken);
+        const u: User = {
+          id: String(claims?.sub ?? ""),
+          email: String(claims?.email ?? ""),
+        };
+        setToken(accessToken);
+        localStorage.setItem("stocker_user", JSON.stringify(u));
+        setTokenState(accessToken);
+        setUser(u);
+        window.history.replaceState(null, "", window.location.pathname + window.location.search);
+        setIsLoading(false);
+        return;
+      }
+    }
+
     const stored = localStorage.getItem(TOKEN_KEY);
     if (stored) {
       // We have a stored token — trust it for now.

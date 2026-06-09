@@ -20,8 +20,17 @@ export function clearToken() {
   localStorage.removeItem(TOKEN_KEY);
 }
 
-async function handleResponse(res: Response) {
-  if (res.status === 401) {
+/** Auth endpoints own their own 401 semantics (bad credentials), so the global
+ *  "session expired → redirect" handler must not hijack them. */
+function isAuthPath(path: string): boolean {
+  return path.startsWith("/v1/auth/");
+}
+
+async function handleResponse(res: Response, path: string) {
+  // A 401 on a non-auth call means the session token is missing/expired —
+  // clear it and bounce to login. A 401 on an auth call (e.g. wrong password)
+  // must fall through so the page can surface the server's message.
+  if (res.status === 401 && !isAuthPath(path)) {
     clearToken();
     window.location.href = "/login";
     throw new Error("Unauthorized");
@@ -49,7 +58,7 @@ export async function apiGet(path: string) {
     method: "GET",
     headers: authHeaders(),
   });
-  return handleResponse(res);
+  return handleResponse(res, path);
 }
 
 export async function apiPost(path: string, body?: unknown) {
@@ -58,7 +67,7 @@ export async function apiPost(path: string, body?: unknown) {
     headers: authHeaders(),
     body: body ? JSON.stringify(body) : undefined,
   });
-  return handleResponse(res);
+  return handleResponse(res, path);
 }
 
 export async function apiDelete(path: string) {
@@ -66,7 +75,7 @@ export async function apiDelete(path: string) {
     method: "DELETE",
     headers: authHeaders(),
   });
-  return handleResponse(res);
+  return handleResponse(res, path);
 }
 
 /** SSE helper — returns raw EventSource (auth token passed as query param) */

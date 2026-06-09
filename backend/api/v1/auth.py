@@ -5,11 +5,18 @@ Uses Supabase Auth for registration and login.
 Returns the Supabase session (access_token + refresh_token).
 """
 
+import logging
+
+import httpx
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, EmailStr
 from core.supabase_client import get_supabase
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+logger = logging.getLogger(__name__)
+
+_AUTH_UNAVAILABLE = "Authentication service is temporarily unavailable. Please try again."
 
 
 class AuthRequest(BaseModel):
@@ -56,6 +63,10 @@ async def register(body: AuthRequest):
         )
     except HTTPException:
         raise
+    except httpx.HTTPError as e:
+        # Network/TLS failure reaching Supabase — not the user's fault.
+        logger.warning("register transport error for %s: %s", body.email, e)
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=_AUTH_UNAVAILABLE)
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -86,7 +97,13 @@ async def login(body: AuthRequest):
         )
     except HTTPException:
         raise
+    except httpx.HTTPError as e:
+        # Network/TLS failure reaching Supabase — surface as 503, not a bogus
+        # "invalid password", so the user knows to retry rather than reset.
+        logger.warning("login transport error for %s: %s", body.email, e)
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=_AUTH_UNAVAILABLE)
     except Exception as e:
+        logger.info("login failed for %s: %s", body.email, e)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password",
