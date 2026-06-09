@@ -22,8 +22,23 @@ PREWARM_ON_STARTUP = os.environ.get("PREWARM_ON_STARTUP", "false").lower() == "t
 # CORS: comma-separated allowlist (e.g. the Vercel URL). Defaults to "*" for
 # local dev. Auth is Bearer-token (not cookies), so credentials stay off — which
 # also keeps a wildcard origin valid for browsers.
-_origins_env = os.environ.get("ALLOWED_ORIGINS", "*").strip()
-ALLOWED_ORIGINS = ["*"] if _origins_env == "*" else [o.strip() for o in _origins_env.split(",") if o.strip()]
+def _parse_origins(raw: str) -> list[str]:
+    """Split a comma list, tolerating quotes/trailing slashes from dashboards/.env."""
+    origins = []
+    for part in raw.split(","):
+        cleaned = part.strip().strip('"').strip("'").rstrip("/")
+        if cleaned:
+            origins.append(cleaned)
+    return origins
+
+
+_origins_env = os.environ.get("ALLOWED_ORIGINS", "*").strip().strip('"').strip("'")
+ALLOWED_ORIGINS = ["*"] if _origins_env in ("", "*") else _parse_origins(_origins_env)
+
+# Belt-and-suspenders: always allow Vercel deployments (production + preview) and
+# localhost dev via regex, regardless of the explicit allowlist — so a wrong/empty
+# ALLOWED_ORIGINS env var can't silently break the frontend with a CORS failure.
+ALLOWED_ORIGIN_REGEX = r"https://([a-z0-9-]+\.)*vercel\.app|http://localhost:\d+"
 
 
 @asynccontextmanager
@@ -48,6 +63,7 @@ app = FastAPI(title="Stock Sentiment Analysis API", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
+    allow_origin_regex=ALLOWED_ORIGIN_REGEX,
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
