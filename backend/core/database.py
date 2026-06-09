@@ -7,7 +7,10 @@ and Redis Pub/Sub for ephemeral streaming logs.
 
 import redis
 import json
+import logging
 import os
+
+logger = logging.getLogger(__name__)
 
 
 class DatabaseManager:
@@ -39,7 +42,7 @@ class DatabaseManager:
                 "result": data,
             }).execute()
         except Exception as e:
-            print(f"Supabase write failed, falling back to Redis: {e}")
+            logger.warning("Supabase write failed for %s, falling back to Redis: %s", task_id, e)
             self._redis.set(f"db:{task_id}", json.dumps(data))
 
     def update_job_status(self, task_id: str, status: str):
@@ -48,8 +51,8 @@ class DatabaseManager:
             self.supabase.table("analysis_jobs").update({
                 "status": status,
             }).eq("id", task_id).execute()
-        except Exception:
-            pass  # Non-fatal
+        except Exception as e:
+            logger.warning("Could not update status=%s for %s: %s", status, task_id, e)
 
     def get_analysis(self, task_id: str) -> dict | None:
         """Fetch analysis result by task_id."""
@@ -65,8 +68,8 @@ class DatabaseManager:
             )
             if result.data and result.data[0].get("result"):
                 return result.data[0]["result"]
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("get_analysis Supabase lookup failed for %s: %s", task_id, e)
 
         # Fall back to Redis
         val = self._redis.get(f"db:{task_id}")

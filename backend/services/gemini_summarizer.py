@@ -5,10 +5,11 @@ Uses Google Gemini 2.0 Flash to generate an investment summary
 given the ticker, scraped texts, and FinBERT sentiment analysis.
 """
 
+import logging
 import os
-import json
 import google.generativeai as genai
 
+logger = logging.getLogger(__name__)
 
 _model = None
 
@@ -71,6 +72,11 @@ Keep it professional, data-driven, and under 250 words total. Do not invent fact
     try:
         model = _get_model()
         response = model.generate_content(prompt)
-        return response.text or "Summary generation failed."
+        # Empty response (or any failure below) → return "" so the frontend
+        # cleanly hides the AI summary panel instead of rendering a raw error.
+        return response.text or ""
     except Exception as e:
-        return f"AI summary unavailable: {e}"
+        # Log the real reason server-side (e.g. a 429 quota error) but never
+        # surface the raw API error to users.
+        logger.warning("Gemini summary failed for %s: %s", ticker, e)
+        return ""

@@ -4,11 +4,16 @@ Stock data endpoints (v1).
 Serves historical price charts with Redis caching.
 """
 
+import logging
+
 from fastapi import APIRouter, HTTPException
 from core.cache import CacheManager
+from core.validators import is_valid_shape
 import yfinance as yf
 
 router = APIRouter(tags=["stocks"])
+
+logger = logging.getLogger(__name__)
 
 # TTLs per period (seconds)
 _PERIOD_TTL = {
@@ -35,30 +40,32 @@ async def get_stock_chart(ticker: str):
     Caches each period independently with tiered TTLs.
     """
     ticker = ticker.upper().strip()
-    if not ticker:
-        raise HTTPException(status_code=400, detail="Ticker is required")
+    if not is_valid_shape(ticker):
+        raise HTTPException(status_code=400, detail=f"'{ticker}' is not a valid ticker symbol")
 
     cache = CacheManager()
+    stock = yf.Ticker(ticker)
 
+    # yfinance's .info is the most rate-limited call and frequently throws under
+    # Yahoo throttling. Treat it as best-effort metadata — we can still build a
+    # usable chart from price history alone.
+    info = {}
     try:
-        stock = yf.Ticker(ticker)
-        info = stock.info
+        info = stock.info or {}
+    except Exception as e:
+        logger.warning("yfinance .info failed for %s: %s", ticker, e)
 
-        name = info.get("longName") or info.get("shortName") or ticker
-        current_price = info.get("currentPrice") or info.get("regularMarketPrice") or 0.0
-        prev_close = info.get("previousClose") or info.get("regularMarketPreviousClose") or current_price
-        change = current_price - prev_close
-        change_pct = (change / prev_close * 100) if prev_close else 0.0
+    history = {}
+    history_ok = False
+    for period_key, (period, interval) in _PERIODS_MAP.items():
+        cache_key = f"stock:{ticker}:{period_key}"
+        cached = cache.get_raw(cache_key)
+        if cached is not None:
+            history[period_key] = cached
+            history_ok = history_ok or len(cached) > 0
+            continue
 
-        history = {}
-        for period_key, (period, interval) in _PERIODS_MAP.items():
-            cache_key = f"stock:{ticker}:{period_key}"
-            cached = cache.get_raw(cache_key)
-
-            if cached is not None:
-                history[period_key] = cached
-                continue
-
+        try:
             hist = stock.history(period=period, interval=interval)
             fmt = "%H:%M" if period_key == "1D" else "%m/%d"
             points = [
@@ -66,15 +73,41 @@ async def get_stock_chart(ticker: str):
                 for idx, row in hist.iterrows()
             ]
             history[period_key] = points
-            cache.set_raw(cache_key, points, ttl=_PERIOD_TTL[period_key])
+            if points:
+                history_ok = True
+                cache.set_raw(cache_key, points, ttl=_PERIOD_TTL[period_key])
+        except Exception as e:
+            logger.warning("yfinance history %s failed for %s: %s", period_key, ticker, e)
+            history[period_key] = []
 
-        return {
-            "ticker": ticker,
-            "name": name,
-            "price": round(float(current_price), 2),
-            "change": round(float(change), 2),
-            "changePercent": round(float(change_pct), 2),
-            "history": history,
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    # Prices: prefer info, fall back to the 1D history endpoints.
+    one_day = history.get("1D") or []
+    current_price = info.get("currentPrice") or info.get("regularMarketPrice")
+    prev_close = info.get("previousClose") or info.get("regularMarketPreviousClose")
+    if not current_price and one_day:
+        current_price = one_day[-1]["price"]
+    if not prev_close and one_day:
+        prev_close = one_day[0]["price"]
+
+    # Nothing usable from any source → upstream is throttling us. 503 is retryable
+    # and lets the client show "temporarily unavailable" instead of a hard error.
+    if not history_ok and not current_price:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Market data for {ticker} is temporarily unavailable. Please try again shortly.",
+        )
+
+    current_price = current_price or 0.0
+    prev_close = prev_close or current_price
+    change = current_price - prev_close
+    change_pct = (change / prev_close * 100) if prev_close else 0.0
+    name = info.get("longName") or info.get("shortName") or ticker
+
+    return {
+        "ticker": ticker,
+        "name": name,
+        "price": round(float(current_price), 2),
+        "change": round(float(change), 2),
+        "changePercent": round(float(change_pct), 2),
+        "history": history,
+    }
