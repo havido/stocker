@@ -10,7 +10,7 @@ npm run dev
 dont cd, just make sure ur root folder is stocker
 docker-compose up --build
 
-misc
+miscellaneous
 testing the scraper api
 - POST http://localhost:8000/api/ticker 
 (get something like this)
