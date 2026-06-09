@@ -1,6 +1,15 @@
-import { X, TrendingUp, TrendingDown } from "lucide-react";
-import { MOCK_WATCHLIST } from "@/lib/mockData";
+import { useState, useEffect } from "react";
+import { X, TrendingUp, TrendingDown, Plus, Star } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { useAuth } from "@/context/AuthContext";
+import { apiGet, apiPost, apiDelete } from "@/lib/api";
+import { toast } from "sonner";
+
+interface WatchlistItem {
+  ticker: string;
+  added_at: string;
+}
 
 interface WatchlistSidebarProps {
   open: boolean;
@@ -9,6 +18,43 @@ interface WatchlistSidebarProps {
 }
 
 export function WatchlistSidebar({ open, onClose, onSelectTicker }: WatchlistSidebarProps) {
+  const { isAuthenticated } = useAuth();
+  const [items, setItems] = useState<WatchlistItem[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [addTicker, setAddTicker] = useState("");
+
+  useEffect(() => {
+    if (open && isAuthenticated) {
+      setLoading(true);
+      apiGet("/v1/users/watchlist")
+        .then((data) => setItems(data.items || []))
+        .catch(() => {})
+        .finally(() => setLoading(false));
+    }
+  }, [open, isAuthenticated]);
+
+  const handleAdd = async () => {
+    const ticker = addTicker.replace("$", "").trim().toUpperCase();
+    if (!ticker) return;
+    try {
+      await apiPost("/v1/users/watchlist", { ticker });
+      setItems((prev) => [{ ticker, added_at: new Date().toISOString() }, ...prev]);
+      setAddTicker("");
+      toast.success(`${ticker} added`);
+    } catch {
+      toast.error("Failed to add ticker");
+    }
+  };
+
+  const handleRemove = async (ticker: string) => {
+    try {
+      await apiDelete(`/v1/users/watchlist/${ticker}`);
+      setItems((prev) => prev.filter((i) => i.ticker !== ticker));
+    } catch {
+      toast.error("Failed to remove ticker");
+    }
+  };
+
   return (
     <>
       {/* Overlay */}
@@ -32,36 +78,73 @@ export function WatchlistSidebar({ open, onClose, onSelectTicker }: WatchlistSid
           </Button>
         </div>
 
-        <div className="p-4 space-y-1">
-          {MOCK_WATCHLIST.map((item) => {
-            const isPositive = item.change >= 0;
-            return (
-              <button
-                key={item.ticker}
-                onClick={() => onSelectTicker(item.ticker)}
-                className="w-full flex items-center justify-between p-3 rounded-lg hover:bg-secondary/70 transition-colors text-left"
-              >
-                <div>
-                  <span className="text-sm font-semibold">{item.ticker}</span>
-                  <p className="text-xs text-muted-foreground">{item.name}</p>
-                </div>
-                <div className="text-right">
-                  <span className="text-sm font-semibold">${item.price.toFixed(2)}</span>
-                  <p className={`text-xs font-medium flex items-center justify-end gap-0.5 ${isPositive ? "text-positive" : "text-negative"}`}>
-                    {isPositive ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
-                    {isPositive ? "+" : ""}{item.change.toFixed(2)}%
-                  </p>
-                </div>
-              </button>
-            );
-          })}
-        </div>
+        {isAuthenticated ? (
+          <>
+            {/* Quick add */}
+            <div className="p-4 border-b border-border">
+              <div className="flex gap-2">
+                <Input
+                  placeholder="Add ticker..."
+                  value={addTicker}
+                  onChange={(e) => setAddTicker(e.target.value.toUpperCase())}
+                  onKeyDown={(e) => e.key === "Enter" && handleAdd()}
+                  className="bg-secondary/50 text-sm"
+                />
+                <Button size="icon" variant="secondary" onClick={handleAdd}>
+                  <Plus className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
 
-        <div className="absolute bottom-0 left-0 right-0 p-4 border-t border-border">
-          <p className="text-xs text-muted-foreground text-center">
-            Connect to Lovable Cloud to save your watchlist
-          </p>
-        </div>
+            <div className="p-4 space-y-1 overflow-y-auto max-h-[calc(100vh-180px)]">
+              {loading ? (
+                Array.from({ length: 4 }).map((_, i) => (
+                  <div key={i} className="animate-pulse flex items-center justify-between p-3">
+                    <div className="space-y-1.5">
+                      <div className="h-4 w-16 bg-muted rounded" />
+                      <div className="h-3 w-24 bg-muted rounded" />
+                    </div>
+                    <div className="h-4 w-12 bg-muted rounded" />
+                  </div>
+                ))
+              ) : items.length === 0 ? (
+                <div className="text-center py-8">
+                  <Star className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
+                  <p className="text-sm text-muted-foreground">No tickers saved yet</p>
+                </div>
+              ) : (
+                items.map((item) => (
+                  <div key={item.ticker} className="group flex items-center justify-between">
+                    <button
+                      onClick={() => onSelectTicker(item.ticker)}
+                      className="flex-1 flex items-center justify-between p-3 rounded-lg hover:bg-secondary/70 transition-colors text-left"
+                    >
+                      <div>
+                        <span className="text-sm font-semibold">${item.ticker}</span>
+                        <p className="text-xs text-muted-foreground">
+                          {new Date(item.added_at).toLocaleDateString()}
+                        </p>
+                      </div>
+                    </button>
+                    <button
+                      onClick={() => handleRemove(item.ticker)}
+                      className="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 mr-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+          </>
+        ) : (
+          <div className="p-8 text-center">
+            <Star className="h-10 w-10 text-muted-foreground mx-auto mb-3" />
+            <p className="text-sm text-muted-foreground">
+              Sign in to save tickers to your watchlist
+            </p>
+          </div>
+        )}
       </aside>
     </>
   );

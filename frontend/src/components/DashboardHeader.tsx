@@ -1,6 +1,15 @@
-import { Search, Star, User, Moon, Sun } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { Search, Star, User, Moon, Sun, LogIn, LogOut, LayoutDashboard } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { useTheme } from "@/hooks/useTheme";
+import { useAuth } from "@/context/AuthContext";
 
 interface DashboardHeaderProps {
   ticker: string;
@@ -12,6 +21,8 @@ interface DashboardHeaderProps {
 
 export function DashboardHeader({ ticker, onTickerChange, onSearch, onToggleWatchlist, loading }: DashboardHeaderProps) {
   const { theme, toggleTheme } = useTheme();
+  const { isAuthenticated, user, logout } = useAuth();
+  const navigate = useNavigate();
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter") onSearch();
@@ -20,12 +31,12 @@ export function DashboardHeader({ ticker, onTickerChange, onSearch, onToggleWatc
   return (
     <header className="flex items-center justify-between gap-4 border-b border-border px-6 py-4">
       <div className="flex items-center gap-3">
-        <div className="flex items-center gap-1">
+        <button onClick={() => navigate("/")} className="flex items-center gap-1">
           <div className="h-8 w-8 rounded-lg bg-primary flex items-center justify-center">
             <span className="text-primary-foreground font-bold text-sm">SP</span>
           </div>
           <span className="text-lg font-semibold tracking-tight">Stockr</span>
-        </div>
+        </button>
       </div>
 
       <div className="flex-1 max-w-xl">
@@ -55,9 +66,36 @@ export function DashboardHeader({ ticker, onTickerChange, onSearch, onToggleWatc
           <Star className="h-4 w-4" />
           Watchlist
         </Button>
-        <Button variant="ghost" size="icon" aria-label="User profile">
-          <User className="h-5 w-5" />
-        </Button>
+
+        {isAuthenticated ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon" aria-label="User menu">
+                <User className="h-5 w-5" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-48">
+              <div className="px-2 py-1.5">
+                <p className="text-sm font-medium truncate">{user?.email}</p>
+              </div>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => navigate("/dashboard")} className="gap-2 cursor-pointer">
+                <LayoutDashboard className="h-4 w-4" />
+                Dashboard
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={logout} className="gap-2 cursor-pointer text-destructive focus:text-destructive">
+                <LogOut className="h-4 w-4" />
+                Sign Out
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : (
+          <Button variant="ghost" size="sm" className="gap-2" onClick={() => navigate("/login")}>
+            <LogIn className="h-4 w-4" />
+            Sign In
+          </Button>
+        )}
       </div>
     </header>
   );

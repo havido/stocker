@@ -1,20 +1,81 @@
+"""
+Database manager.
+
+Handles persistence to Supabase (PostgreSQL) for analysis jobs,
+and Redis Pub/Sub for ephemeral streaming logs.
+"""
+
 import redis
 import json
 import os
 
+
 class DatabaseManager:
     def __init__(self):
         redis_url = os.environ.get("REDIS_URL", "redis://redis:6379/0")
-        self.client = redis.Redis.from_url(redis_url, decode_responses=True)
-        
-    def save_analysis(self, identifier: str, data: dict):
-        self.client.set(f"db:{identifier}", json.dumps(data))
-        
-    def get_analysis(self, identifier: str):
-        val = self.client.get(f"db:{identifier}")
+        self._redis = redis.Redis.from_url(redis_url, decode_responses=True)
+        self._supabase = None
+
+    @property
+    def supabase(self):
+        """Lazy-load Supabase client (avoids import overhead in lightweight contexts)."""
+        if self._supabase is None:
+            from core.supabase_client import get_supabase_admin
+            self._supabase = get_supabase_admin()
+        return self._supabase
+
+    # ── Analysis job persistence ─────────────────────────────
+
+    def save_analysis(self, task_id: str, ticker: str, data: dict):
+        """
+        Save completed analysis to Supabase and mark job as completed.
+        Falls back to Redis-only if Supabase is unavailable.
+        """
+        try:
+            self.supabase.table("analysis_jobs").upsert({
+                "id": task_id,
+                "ticker": ticker,
+                "status": "completed",
+                "result": data,
+            }).execute()
+        except Exception as e:
+            print(f"Supabase write failed, falling back to Redis: {e}")
+            self._redis.set(f"db:{task_id}", json.dumps(data))
+
+    def update_job_status(self, task_id: str, status: str):
+        """Update the status field of an analysis job."""
+        try:
+            self.supabase.table("analysis_jobs").update({
+                "status": status,
+            }).eq("id", task_id).execute()
+        except Exception:
+            pass  # Non-fatal
+
+    def get_analysis(self, task_id: str) -> dict | None:
+        """Fetch analysis result by task_id."""
+        # Try Supabase first
+        try:
+            result = (
+                self.supabase.table("analysis_jobs")
+                .select("result")
+                .eq("id", task_id)
+                .eq("status", "completed")
+                .limit(1)
+                .execute()
+            )
+            if result.data and result.data[0].get("result"):
+                return result.data[0]["result"]
+        except Exception:
+            pass
+
+        # Fall back to Redis
+        val = self._redis.get(f"db:{task_id}")
         if val:
             return json.loads(val)
         return None
 
+    # ── Pub/Sub (ephemeral logs — stays on Redis) ────────────
+
     def publish_log(self, identifier: str, message: str):
-        self.client.publish(f"logs:{identifier}", message)
+        """Publish a log message to Redis Pub/Sub for SSE streaming."""
+        self._redis.publish(f"logs:{identifier}", message)

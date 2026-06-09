@@ -1,16 +1,17 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
 import { DashboardHeader } from "@/components/DashboardHeader";
 import { SentimentResults, type SentimentData } from "@/components/SentimentResults";
 import { StockChart, type StockChartData } from "@/components/StockChart";
 import { WatchlistSidebar } from "@/components/WatchlistSidebar";
+import { AISummary } from "@/components/AISummary";
 import { BarChart3, AlertCircle } from "lucide-react";
-
-const API_BASE = "http://localhost:8000";
-const POLL_INTERVAL_MS = 2000;
+import { API_BASE } from "@/lib/api";
 
 type AppState = "idle" | "loading" | "completed" | "error";
 
 const Index = () => {
+  const [searchParams] = useSearchParams();
   const [ticker, setTicker] = useState("");
   const [activeTicker, setActiveTicker] = useState("");
   const [appState, setAppState] = useState<AppState>("idle");
@@ -19,15 +20,11 @@ const Index = () => {
   const [stockLoading, setStockLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [watchlistOpen, setWatchlistOpen] = useState(false);
-  const [logs, setLogs] = useState<{ step: string, message: string }[]>([]);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [logs, setLogs] = useState<{ step: string; message: string }[]>([]);
+  const [aiSummary, setAiSummary] = useState("");
   const streamRef = useRef<EventSource | null>(null);
 
-  const stopPolling = () => {
-    if (pollRef.current) {
-      clearInterval(pollRef.current);
-      pollRef.current = null;
-    }
+  const stopStream = () => {
     if (streamRef.current) {
       streamRef.current.close();
       streamRef.current = null;
@@ -38,7 +35,7 @@ const Index = () => {
     setStockLoading(true);
     setStockData(null);
     try {
-      const res = await fetch(`${API_BASE}/api/stock/${cleanTicker}`);
+      const res = await fetch(`${API_BASE}/v1/stocks/${cleanTicker}/chart`);
       if (!res.ok) throw new Error(`Stock data fetch failed (${res.status})`);
       const data = await res.json();
       setStockData(data);
@@ -50,9 +47,9 @@ const Index = () => {
   }, []);
 
   const streamForResult = useCallback((taskId: string) => {
-    stopPolling();
+    stopStream();
 
-    const es = new EventSource(`${API_BASE}/api/stream/${taskId}`);
+    const es = new EventSource(`${API_BASE}/v1/analysis/jobs/${taskId}/stream`);
     streamRef.current = es;
 
     es.onmessage = async (event) => {
@@ -66,13 +63,14 @@ const Index = () => {
           const data = await res.json();
           if (data.status === "completed") {
             setSentimentData(data.result);
+            setAiSummary(data.result?.ai_summary || "");
             setAppState("completed");
             setLogs([]);
           } else {
             setError("Analysis failed. Please try again.");
             setAppState("error");
           }
-        } catch (err) {
+        } catch {
           setError("Failed to fetch final results");
           setAppState("error");
         }
@@ -81,11 +79,11 @@ const Index = () => {
           const parsed = JSON.parse(event.data);
           if (parsed && parsed.step && parsed.message) {
             setLogs((prev) => {
-              const filtered = prev.filter(l => l.step !== parsed.step);
+              const filtered = prev.filter((l) => l.step !== parsed.step);
               return [...filtered, parsed];
             });
           }
-        } catch (e) {
+        } catch {
           console.warn("Unparseable log", event.data);
         }
       }
@@ -101,9 +99,10 @@ const Index = () => {
 
   const startSearch = useCallback(
     async (cleanTicker: string) => {
-      stopPolling();
+      stopStream();
       setActiveTicker(cleanTicker);
       setSentimentData(null);
+      setAiSummary("");
       setError(null);
       setLogs([]);
       setAppState("loading");
@@ -111,7 +110,7 @@ const Index = () => {
       fetchStockData(cleanTicker);
 
       try {
-        const res = await fetch(`${API_BASE}/api/ticker`, {
+        const res = await fetch(`${API_BASE}/v1/analysis/jobs`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ ticker: cleanTicker }),
@@ -121,6 +120,7 @@ const Index = () => {
 
         if (data.status === "hit" && data.data) {
           setSentimentData(data.data);
+          setAiSummary(data.data?.ai_summary || "");
           setAppState("completed");
         } else if (data.task_id) {
           streamForResult(data.task_id);
@@ -151,6 +151,18 @@ const Index = () => {
     },
     [startSearch]
   );
+
+  // Handle ?ticker= query param (from Dashboard navigation)
+  useEffect(() => {
+    const paramTicker = searchParams.get("ticker");
+    if (paramTicker) {
+      const clean = paramTicker.replace("$", "").trim().toUpperCase();
+      if (clean && clean !== activeTicker) {
+        setTicker(clean);
+        startSearch(clean);
+      }
+    }
+  }, [searchParams]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const showResults = appState !== "idle";
 
@@ -237,9 +249,12 @@ const Index = () => {
                 </div>
               )}
 
-              {/* Sentiment results */}
+              {/* Sentiment results + AI Summary */}
               {appState === "completed" && sentimentData && (
-                <SentimentResults data={sentimentData} ticker={activeTicker} />
+                <>
+                  <SentimentResults data={sentimentData} ticker={activeTicker} />
+                  {aiSummary && <AISummary summary={aiSummary} ticker={activeTicker} />}
+                </>
               )}
             </div>
           </div>

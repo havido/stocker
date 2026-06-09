@@ -1,4 +1,5 @@
 import { TrendingUp, TrendingDown, Minus, BarChart3 } from "lucide-react";
+import { GradeBadge } from "@/components/GradeBadge";
 
 export interface SentimentData {
   positive: number;
@@ -8,6 +9,9 @@ export interface SentimentData {
   average_negative_score: number;
   average_neutral_score: number;
   verdict: string;
+  grade?: string;
+  weighted_score?: number;
+  ai_summary?: string;
 }
 
 interface SentimentResultsProps {
@@ -221,7 +225,7 @@ export function SentimentResults({ data, ticker }: SentimentResultsProps) {
               </p>
             </div>
           </div>
-          <VerdictBadge verdict={data.verdict} />
+          {data.grade ? <GradeBadge grade={data.grade} /> : <VerdictBadge verdict={data.verdict} />}
         </div>
       </div>
 

@@ -1,0 +1,33 @@
+# Local secrets and environment files
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Python artifacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+env/
+
+# Node / Vite artifacts
+node_modules/
+dist/
+build/
+coverage/
+.vite/
+
+# Logs
+*.log

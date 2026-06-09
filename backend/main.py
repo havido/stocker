@@ -3,7 +3,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from broker import broker
 from taskiq.kicker import AsyncKicker
-from api import ticker
+from api.v1 import auth, analysis, stocks, watchlist
+
+# Keep the old router for backward compatibility during migration
+from api import ticker as ticker_legacy
+
 
 # Popular tickers to pre-warm on startup
 PREWARM_TICKERS = ["AAPL", "TSLA", "NVDA", "MSFT", "GOOGL"]
@@ -34,7 +38,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(ticker.router, prefix="/api")
+# ── v1 API routes ───────────────────────────────────────────
+app.include_router(auth.router, prefix="/v1")
+app.include_router(analysis.router, prefix="/v1")
+app.include_router(stocks.router, prefix="/v1")
+app.include_router(watchlist.router, prefix="/v1")
+
+# ── Legacy routes (kept for backward compat during frontend migration) ──
+app.include_router(ticker_legacy.router, prefix="/api")
 
 @app.get("/")
 @app.head("/")
@@ -45,5 +56,3 @@ def read_root():
 @app.head("/health")
 def healthcheck():
     return {"status": "ok"}
-
-

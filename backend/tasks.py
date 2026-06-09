@@ -29,6 +29,9 @@ async def analyze_sentiment_task(ticker: str, context: Context = TaskiqDepends()
     def log_cb(msg):
         db.publish_log(task_id, msg)
 
+    # Mark job as running
+    db.update_job_status(task_id, "running")
+
     # 1. Scrape Reddit
     db.publish_log(task_id, f'{{"step": "reddit", "message": "Scraping Reddit for {ticker}..."}}')
     from services.reddit_scraper import scrape_reddit
@@ -54,13 +57,29 @@ async def analyze_sentiment_task(ticker: str, context: Context = TaskiqDepends()
 
     text = [t for t in texts if t]
 
-    # 3. Analyze
+    # 3. FinBERT Sentiment Analysis
     db.publish_log(task_id, f'{{"step": "sentiment", "message": "Starting FinBERT sentiment analysis..."}}')
     score = sentiment.analyze(text, log_callback=log_cb)
 
-    # 4. Save to DB (by task_id) AND Cache (by ticker with TTL)
+    # 4. Gemini AI Summary
+    ai_summary = ""
+    try:
+        from services.gemini_summarizer import generate_summary
+        ai_summary = generate_summary(
+            ticker=ticker,
+            sentiment_summary=score,
+            sample_texts=text,
+            log_callback=log_cb,
+        )
+    except Exception as e:
+        db.publish_log(task_id, f'{{"step": "gemini", "message": "AI summary skipped: {e}"}}')
+
+    # 5. Build final result
+    score["ai_summary"] = ai_summary
+
+    # 6. Save to Supabase (by task_id with ticker) AND Cache (by ticker with TTL)
     db.publish_log(task_id, f'{{"step": "saving", "message": "Analysis complete. Caching results..."}}')
-    db.save_analysis(task_id, score)
+    db.save_analysis(task_id, ticker, score)
 
     from core.cache import CacheManager
     cache = CacheManager()

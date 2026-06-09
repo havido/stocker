@@ -5,5 +5,7 @@ taskiq
 taskiq-redis
 redis>=5.0
 pydantic
+pydantic[email]
 python-dotenv
 yfinance>=0.2.36
+supabase>=2.0

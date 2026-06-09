@@ -82,15 +82,38 @@ def analyze_sentiment(texts: list[str], log_callback=None) -> list[dict]:
     return results
 
 
+def _compute_grade(weighted_score: float) -> str:
+    """
+    Map a weighted sentiment score [-1, +1] to a 5-tier grade.
+
+    Thresholds:
+      >= +0.35  → Strong Buy
+      >= +0.10  → Buy
+      >= -0.10  → Hold
+      >= -0.35  → Sell
+      <  -0.35  → Strong Sell
+    """
+    if weighted_score >= 0.35:
+        return "Strong Buy"
+    elif weighted_score >= 0.10:
+        return "Buy"
+    elif weighted_score >= -0.10:
+        return "Hold"
+    elif weighted_score >= -0.35:
+        return "Sell"
+    else:
+        return "Strong Sell"
+
+
 def compute_summary(sentiments: list[dict]) -> dict:
     """
-    Compute aggregate sentiment summary.
+    Compute aggregate sentiment summary with 5-tier grading.
 
     Args:
         sentiments: List of sentiment dicts from analyze_sentiment().
 
     Returns:
-        Dict with counts, average scores per label, and overall verdict.
+        Dict with counts, average scores per label, verdict, and grade.
     """
     if not sentiments:
         return {
@@ -101,6 +124,7 @@ def compute_summary(sentiments: list[dict]) -> dict:
             "average_negative_score": 0.0,
             "average_neutral_score": 0.0,
             "verdict": "neutral",
+            "grade": "Hold",
         }
 
     counts = {"positive": 0, "negative": 0, "neutral": 0}
@@ -120,6 +144,17 @@ def compute_summary(sentiments: list[dict]) -> dict:
     # Verdict = label with the most entries
     verdict = max(counts, key=counts.get)
 
+    # Weighted score: positive contributes +1, negative -1, neutral 0,
+    # each weighted by its confidence score.
+    total = sum(counts.values())
+    if total > 0:
+        weighted = (
+            (counts["positive"] * avg_scores["positive"])
+            - (counts["negative"] * avg_scores["negative"])
+        ) / total
+    else:
+        weighted = 0.0
+
     return {
         "positive": counts["positive"],
         "negative": counts["negative"],
@@ -128,6 +163,8 @@ def compute_summary(sentiments: list[dict]) -> dict:
         "average_negative_score": avg_scores["negative"],
         "average_neutral_score": avg_scores["neutral"],
         "verdict": verdict,
+        "grade": _compute_grade(weighted),
+        "weighted_score": round(weighted, 4),
     }
 
 class SentimentAnalyzer:
