@@ -56,3 +56,38 @@ def test_chart_output_is_json_serializable_despite_nan_history(monkeypatch):
     assert len(result["history"]["1D"]) == 2
     assert all(math.isfinite(p["price"]) for p in result["history"]["1D"])
     assert math.isfinite(result["price"])
+
+
+def test_cached_nan_points_are_scrubbed(monkeypatch):
+    """A cache hit returning NaN-laden points (from an older build) must still
+    produce a JSON-serializable response."""
+
+    class FakeStock:
+        @property
+        def info(self):
+            raise RuntimeError("Too Many Requests")
+
+        def history(self, period, interval):
+            return pd.DataFrame({"Close": []})
+
+    # Only the price-series keys (stock:*) hold cached points; an older build
+    # cached NaN into them. Name/other keys behave normally.
+    class NaNCache:
+        def get_raw(self, k):
+            if k.startswith("stock:"):
+                return [
+                    {"time": "09:30", "price": 100.0},
+                    {"time": "09:35", "price": float("nan")},
+                ]
+            return None
+
+        def set_raw(self, k, v, ttl=None):
+            pass
+
+    monkeypatch.setattr(stocks.yf, "Ticker", lambda t: FakeStock())
+    monkeypatch.setattr(stocks.yf, "Search", lambda t: type("S", (), {"quotes": []})())
+    monkeypatch.setattr(stocks, "CacheManager", lambda: NaNCache())
+
+    result = asyncio.run(stocks.get_stock_chart("AAPL"))
+    json.dumps(result, allow_nan=False)  # must not raise
+    assert all(math.isfinite(p["price"]) for pts in result["history"].values() for p in pts)

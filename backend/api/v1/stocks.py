@@ -133,6 +133,20 @@ async def get_stock_chart(ticker: str):
                 logger.warning("yfinance history %s failed for %s: %s", period_key, ticker, e)
                 history[period_key] = []
 
+        # Final NaN scrub — also cleans cached points from older builds. JSON
+        # round-trips NaN as float('nan') (json.dumps writes the literal NaN,
+        # json.loads reads it back), so cached series can carry NaN that crashes
+        # the response renderer. Filter every point regardless of its source.
+        for pk in list(history.keys()):
+            history[pk] = [
+                {"time": p.get("time"), "price": round(float(p["price"]), 2)}
+                for p in (history.get(pk) or [])
+                if isinstance(p, dict)
+                and p.get("price") is not None
+                and math.isfinite(float(p["price"]))
+            ]
+        history_ok = any(history.values())
+
         # Prices: prefer info, fall back to the 1D history endpoints.
         one_day = history.get("1D") or []
         current_price = info.get("currentPrice") or info.get("regularMarketPrice")
