@@ -130,7 +130,9 @@ async def get_stock_chart(ticker: str):
                 continue
 
             try:
-                hist = stock.history(period=period, interval=interval)
+                # auto_adjust=True → Close is split/dividend-adjusted, so multi-year
+                # returns (e.g. post-split NVDA) are computed on a consistent basis.
+                hist = stock.history(period=period, interval=interval, auto_adjust=True)
                 fmt = _label_fmt(period_key)
                 points = []
                 for idx, row in hist.iterrows():

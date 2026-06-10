@@ -35,7 +35,7 @@ def test_endpoint_returns_all_spec_periods(monkeypatch):
         def info(self):
             return {"longName": "Apple Inc.", "currentPrice": 200.0, "previousClose": 198.0}
 
-        def history(self, period, interval):
+        def history(self, period, interval, **kwargs):
             idx = pd.to_datetime(["2026-06-09", "2026-06-10"])
             return pd.DataFrame({"Close": [198.0, 200.0]}, index=idx)
 
@@ -68,7 +68,7 @@ def test_chart_output_is_json_serializable_despite_nan_history(monkeypatch):
         def info(self):
             raise RuntimeError("Too Many Requests. Rate limited.")
 
-        def history(self, period, interval):
+        def history(self, period, interval, **kwargs):
             idx = pd.to_datetime(
                 ["2026-06-10 09:30", "2026-06-10 09:35", "2026-06-10 09:40"]
             )
@@ -105,7 +105,7 @@ def test_cached_nan_points_are_scrubbed(monkeypatch):
         def info(self):
             raise RuntimeError("Too Many Requests")
 
-        def history(self, period, interval):
+        def history(self, period, interval, **kwargs):
             return pd.DataFrame({"Close": []})
 
     # Only the price-series keys (stock:*) hold cached points; an older build

@@ -27,16 +27,17 @@ describe("StockChart periods", () => {
 });
 
 describe("StockChart gain/loss", () => {
-  // current price 1000; intraday started at 1005 (-0.50%); 10Y started at 100 (+900%)
+  // current 1000. Backend "today" = -0.50% (vs prev close 1005). The 1D chart
+  // *opened* at 990 (intraday would be +1.01%). 10Y opened at 100 (+900%).
   const nvda: StockChartData = {
     ticker: "NVDA",
     name: "NVIDIA",
     price: 1000,
-    change: -5, // backend's 1-day figure — must NOT be shown for 10Y
+    change: -5, // current 1000 vs previous close 1005 → broker's "today"
     changePercent: -0.5,
     history: {
       "1D": [
-        { time: "09:30", price: 1005 },
+        { time: "09:30", price: 990 },
         { time: "16:00", price: 1000 },
       ],
       "10Y": [
@@ -46,16 +47,18 @@ describe("StockChart gain/loss", () => {
     },
   };
 
-  it("reflects the selected period, not just the day", () => {
+  it("1D uses the broker's previous-close basis, not the intraday open", () => {
     const { container } = render(<StockChart data={nvda} loading={false} />);
+    // Shows the backend's prev-close daily (-0.50%), NOT the intraday-open figure (+1.01%)
+    expect(container.textContent).toContain("-0.50%");
+    expect(container.textContent).not.toContain("1.01%");
+  });
 
-    // 1D (default): intraday change ≈ -0.50%, NOT the 10-year number
-    expect(container.textContent).toContain("0.50%");
-    expect(container.textContent).not.toContain("900.00%");
-
-    // Switch to 10Y → gain/loss recomputes over the whole range (+900%)
+  it("longer ranges use the visible range (first point → current)", () => {
+    render(<StockChart data={nvda} loading={false} />);
     fireEvent.click(screen.getByRole("button", { name: "10Y" }));
-    expect(container.textContent).toContain("900.00%");
-    expect(container.textContent).toContain("+$900.00");
+    const text = document.body.textContent ?? "";
+    expect(text).toContain("900.00%");
+    expect(text).toContain("+$900.00");
   });
 });

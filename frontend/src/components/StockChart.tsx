@@ -68,12 +68,16 @@ export function StockChart({ data, loading, error, onRetry }: StockChartProps) {
 
   const chartData: PricePoint[] = data.history[period] ?? [];
 
-  // Gain/loss must reflect the SELECTED period — from the first point in the
-  // visible range to the current price — not the backend's 1-day change.
+  // Gain/loss reflects the SELECTED period.
+  //  • 1D matches a broker's "today": current vs the PREVIOUS close (includes the
+  //    overnight gap), which the backend already computes as data.change.
+  //  • Longer ranges use the visible range (first point → current) on
+  //    split-adjusted prices, like a broker's period return.
   const startPrice = chartData[0]?.price ?? 0;
   const hasRange = chartData.length > 0 && startPrice !== 0;
-  const periodChange = hasRange ? data.price - startPrice : data.change;
-  const periodChangePct = hasRange ? (periodChange / startPrice) * 100 : data.changePercent;
+  const useDaily = period === "1D" || !hasRange;
+  const periodChange = useDaily ? data.change : data.price - startPrice;
+  const periodChangePct = useDaily ? data.changePercent : (periodChange / startPrice) * 100;
   const isPositive = periodChange >= 0;
 
   return (
