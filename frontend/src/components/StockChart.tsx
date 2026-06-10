@@ -28,9 +28,6 @@ interface StockChartProps {
 export function StockChart({ data, loading, error, onRetry }: StockChartProps) {
   const [period, setPeriod] = useState<string>("1D");
 
-  const chartData: PricePoint[] = data?.history[period] ?? [];
-  const isPositive = (data?.change ?? 0) >= 0;
-
   if (loading) {
     return (
       <div className="rounded-xl border border-border bg-card p-6 space-y-4 animate-pulse">
@@ -69,6 +66,16 @@ export function StockChart({ data, loading, error, onRetry }: StockChartProps) {
 
   if (!data) return null;
 
+  const chartData: PricePoint[] = data.history[period] ?? [];
+
+  // Gain/loss must reflect the SELECTED period — from the first point in the
+  // visible range to the current price — not the backend's 1-day change.
+  const startPrice = chartData[0]?.price ?? 0;
+  const hasRange = chartData.length > 0 && startPrice !== 0;
+  const periodChange = hasRange ? data.price - startPrice : data.change;
+  const periodChangePct = hasRange ? (periodChange / startPrice) * 100 : data.changePercent;
+  const isPositive = periodChange >= 0;
+
   return (
     <div className="rounded-xl border border-border bg-card p-6">
       <div className="mb-1 flex items-baseline gap-3">
@@ -86,10 +93,10 @@ export function StockChart({ data, loading, error, onRetry }: StockChartProps) {
         >
           {isPositive ? <TrendingUp className="h-4 w-4" /> : <TrendingDown className="h-4 w-4" />}
           {isPositive ? "+" : ""}
-          {data.changePercent.toFixed(2)}%
+          {periodChangePct.toFixed(2)}%
         </span>
         <span className="text-sm text-muted-foreground">
-          ({isPositive ? "+" : ""}${data.change.toFixed(2)})
+          ({isPositive ? "+" : ""}${periodChange.toFixed(2)})
         </span>
       </div>
 
