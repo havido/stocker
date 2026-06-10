@@ -1,7 +1,13 @@
 FROM python:3.11-slim
 WORKDIR /app
 COPY requirements-worker.txt .
-RUN pip install --no-cache-dir -r requirements-worker.txt
+# Install CPU-only torch FIRST. The default torch wheel now pulls ~2.5GB of CUDA
+# libraries (cudnn/nccl/triton/cufft/…) that this CPU VM doesn't need and which
+# overflow the disk. FinBERT runs on CPU, so the CPU build is correct and ~10x
+# smaller. Installing it first means the later `-r requirements` sees torch as
+# already-satisfied and won't re-pull the CUDA variant.
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu \
+    && pip install --no-cache-dir -r requirements-worker.txt
 COPY . .
 
 # Start the TaskIQ worker
