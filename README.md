@@ -22,3 +22,4 @@ testing the scraper api
 and then paste the task id into the next get request like this:
 http://localhost:8000/api/status/06235b86cf894e93b0d9a96c2fe74603
 
+majority of code is in branch deployment - this should be considered "staging" branch to be merged into main which is the real "production"
