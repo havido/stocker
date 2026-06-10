@@ -7,5 +7,8 @@ redis>=5.0
 pydantic
 pydantic[email]
 python-dotenv
-yfinance>=0.2.36
+# Pin to the 0.2.x line: yfinance 1.x switched to curl_cffi + pandas 3 and
+# fails on Render's datacenter env (the chart 500'd after a rebuild pulled 1.x).
+# The 0.2.x line is requests-based and worked reliably here.
+yfinance>=0.2.40,<0.3
 supabase>=2.0
