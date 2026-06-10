@@ -5,6 +5,7 @@ Serves historical price charts with Redis caching.
 """
 
 import logging
+import math
 
 from fastapi import APIRouter, HTTPException
 from core.cache import CacheManager
@@ -14,6 +15,17 @@ import yfinance as yf
 router = APIRouter(tags=["stocks"])
 
 logger = logging.getLogger(__name__)
+
+
+def _finite(x, default: float = 0.0) -> float:
+    """Coerce to a finite float. NaN/Inf are not JSON-serializable (Starlette
+    renders with allow_nan=False) — rate-limited yfinance responses contain NaN,
+    which would otherwise crash response serialization with an unhandled 500."""
+    try:
+        v = float(x)
+    except (TypeError, ValueError):
+        return default
+    return v if math.isfinite(v) else default
 
 # TTLs per period (seconds)
 _PERIOD_TTL = {
@@ -105,10 +117,14 @@ async def get_stock_chart(ticker: str):
             try:
                 hist = stock.history(period=period, interval=interval)
                 fmt = "%H:%M" if period_key == "1D" else "%m/%d"
-                points = [
-                    {"time": idx.strftime(fmt), "price": round(float(row["Close"]), 2)}
-                    for idx, row in hist.iterrows()
-                ]
+                points = []
+                for idx, row in hist.iterrows():
+                    close = row["Close"]
+                    # Rate-limited responses include NaN rows — skip them so the
+                    # response stays JSON-serializable (no NaN/Inf).
+                    if close is None or not math.isfinite(float(close)):
+                        continue
+                    points.append({"time": idx.strftime(fmt), "price": round(float(close), 2)})
                 history[period_key] = points
                 if points:
                     history_ok = True
@@ -133,8 +149,9 @@ async def get_stock_chart(ticker: str):
                 detail=f"Market data for {ticker} is temporarily unavailable. Please try again shortly.",
             )
 
-        current_price = current_price or 0.0
-        prev_close = prev_close or current_price
+        # Sanitize every float so a NaN/Inf can never reach the JSON renderer.
+        current_price = _finite(current_price)
+        prev_close = _finite(prev_close, current_price)
         change = current_price - prev_close
         change_pct = (change / prev_close * 100) if prev_close else 0.0
         name = _company_name(ticker, info, cache)
@@ -142,16 +159,16 @@ async def get_stock_chart(ticker: str):
         return {
             "ticker": ticker,
             "name": name,
-            "price": round(float(current_price), 2),
-            "change": round(float(change), 2),
-            "changePercent": round(float(change_pct), 2),
+            "price": round(_finite(current_price), 2),
+            "change": round(_finite(change), 2),
+            "changePercent": round(_finite(change_pct), 2),
             "history": history,
         }
     except HTTPException:
         raise
     except Exception as e:
-        # TEMP diagnostic: surface the exception class+message so we can see why
-        # the chart is 500ing on Render (datacenter IP). Replace with a generic
-        # message once the root cause is fixed.
         logger.exception("chart endpoint failed for %s", ticker)
-        raise HTTPException(status_code=503, detail=f"chart error: {type(e).__name__}: {str(e)[:160]}")
+        raise HTTPException(
+            status_code=503,
+            detail=f"Market data for {ticker} is temporarily unavailable. Please try again shortly.",
+        )
