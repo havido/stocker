@@ -76,70 +76,82 @@ async def get_stock_chart(ticker: str):
         raise HTTPException(status_code=400, detail=f"'{ticker}' is not a valid ticker symbol")
 
     cache = CacheManager()
-    stock = yf.Ticker(ticker)
 
-    # yfinance's .info is the most rate-limited call and frequently throws under
-    # Yahoo throttling. Treat it as best-effort metadata — we can still build a
-    # usable chart from price history alone.
-    info = {}
+    # Wrap the whole body: any unexpected failure must become an HTTPException
+    # (which keeps CORS headers) rather than an unhandled 500 — an unhandled 500
+    # bypasses the CORS middleware and shows up in the browser as "failed to fetch".
     try:
-        info = stock.info or {}
-    except Exception as e:
-        logger.warning("yfinance .info failed for %s: %s", ticker, e)
+        stock = yf.Ticker(ticker)
 
-    history = {}
-    history_ok = False
-    for period_key, (period, interval) in _PERIODS_MAP.items():
-        cache_key = f"stock:{ticker}:{period_key}"
-        cached = cache.get_raw(cache_key)
-        if cached is not None:
-            history[period_key] = cached
-            history_ok = history_ok or len(cached) > 0
-            continue
-
+        # yfinance's .info is the most rate-limited call and frequently throws under
+        # Yahoo throttling. Treat it as best-effort metadata — we can still build a
+        # usable chart from price history alone.
+        info = {}
         try:
-            hist = stock.history(period=period, interval=interval)
-            fmt = "%H:%M" if period_key == "1D" else "%m/%d"
-            points = [
-                {"time": idx.strftime(fmt), "price": round(float(row["Close"]), 2)}
-                for idx, row in hist.iterrows()
-            ]
-            history[period_key] = points
-            if points:
-                history_ok = True
-                cache.set_raw(cache_key, points, ttl=_PERIOD_TTL[period_key])
+            info = stock.info or {}
         except Exception as e:
-            logger.warning("yfinance history %s failed for %s: %s", period_key, ticker, e)
-            history[period_key] = []
+            logger.warning("yfinance .info failed for %s: %s", ticker, e)
 
-    # Prices: prefer info, fall back to the 1D history endpoints.
-    one_day = history.get("1D") or []
-    current_price = info.get("currentPrice") or info.get("regularMarketPrice")
-    prev_close = info.get("previousClose") or info.get("regularMarketPreviousClose")
-    if not current_price and one_day:
-        current_price = one_day[-1]["price"]
-    if not prev_close and one_day:
-        prev_close = one_day[0]["price"]
+        history = {}
+        history_ok = False
+        for period_key, (period, interval) in _PERIODS_MAP.items():
+            cache_key = f"stock:{ticker}:{period_key}"
+            cached = cache.get_raw(cache_key)
+            if cached is not None:
+                history[period_key] = cached
+                history_ok = history_ok or len(cached) > 0
+                continue
 
-    # Nothing usable from any source → upstream is throttling us. 503 is retryable
-    # and lets the client show "temporarily unavailable" instead of a hard error.
-    if not history_ok and not current_price:
-        raise HTTPException(
-            status_code=503,
-            detail=f"Market data for {ticker} is temporarily unavailable. Please try again shortly.",
-        )
+            try:
+                hist = stock.history(period=period, interval=interval)
+                fmt = "%H:%M" if period_key == "1D" else "%m/%d"
+                points = [
+                    {"time": idx.strftime(fmt), "price": round(float(row["Close"]), 2)}
+                    for idx, row in hist.iterrows()
+                ]
+                history[period_key] = points
+                if points:
+                    history_ok = True
+                    cache.set_raw(cache_key, points, ttl=_PERIOD_TTL[period_key])
+            except Exception as e:
+                logger.warning("yfinance history %s failed for %s: %s", period_key, ticker, e)
+                history[period_key] = []
 
-    current_price = current_price or 0.0
-    prev_close = prev_close or current_price
-    change = current_price - prev_close
-    change_pct = (change / prev_close * 100) if prev_close else 0.0
-    name = _company_name(ticker, info, cache)
+        # Prices: prefer info, fall back to the 1D history endpoints.
+        one_day = history.get("1D") or []
+        current_price = info.get("currentPrice") or info.get("regularMarketPrice")
+        prev_close = info.get("previousClose") or info.get("regularMarketPreviousClose")
+        if not current_price and one_day:
+            current_price = one_day[-1]["price"]
+        if not prev_close and one_day:
+            prev_close = one_day[0]["price"]
 
-    return {
-        "ticker": ticker,
-        "name": name,
-        "price": round(float(current_price), 2),
-        "change": round(float(change), 2),
-        "changePercent": round(float(change_pct), 2),
-        "history": history,
-    }
+        # Nothing usable from any source → upstream is throttling us. 503 is retryable.
+        if not history_ok and not current_price:
+            raise HTTPException(
+                status_code=503,
+                detail=f"Market data for {ticker} is temporarily unavailable. Please try again shortly.",
+            )
+
+        current_price = current_price or 0.0
+        prev_close = prev_close or current_price
+        change = current_price - prev_close
+        change_pct = (change / prev_close * 100) if prev_close else 0.0
+        name = _company_name(ticker, info, cache)
+
+        return {
+            "ticker": ticker,
+            "name": name,
+            "price": round(float(current_price), 2),
+            "change": round(float(change), 2),
+            "changePercent": round(float(change_pct), 2),
+            "history": history,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        # TEMP diagnostic: surface the exception class+message so we can see why
+        # the chart is 500ing on Render (datacenter IP). Replace with a generic
+        # message once the root cause is fixed.
+        logger.exception("chart endpoint failed for %s", ticker)
+        raise HTTPException(status_code=503, detail=f"chart error: {type(e).__name__}: {str(e)[:160]}")
