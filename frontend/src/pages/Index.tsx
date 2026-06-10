@@ -6,6 +6,7 @@ import { StockChart, type StockChartData } from "@/components/StockChart";
 import { WatchlistSidebar } from "@/components/WatchlistSidebar";
 import { AISummary } from "@/components/AISummary";
 import { SourcesList } from "@/components/SourcesList";
+import { SaveToListButton } from "@/components/SaveToListButton";
 import { BarChart3, AlertCircle } from "lucide-react";
 import { API_BASE } from "@/lib/api";
 import { normalizeTicker, isValidTickerShape } from "@/lib/ticker";
@@ -256,6 +257,11 @@ const Index = () => {
                 error={stockError}
                 onRetry={() => activeTicker && fetchStockData(activeTicker)}
               />
+              {activeTicker && (
+                <div className="mt-3 flex justify-center">
+                  <SaveToListButton key={activeTicker} ticker={activeTicker} />
+                </div>
+              )}
             </div>
 
             {/* Right — Sentiment Panel */}
