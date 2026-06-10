@@ -73,7 +73,9 @@ export function StockChart({ data, loading, error, onRetry }: StockChartProps) {
     <div className="rounded-xl border border-border bg-card p-6">
       <div className="mb-1 flex items-baseline gap-3">
         <h2 className="text-2xl font-bold">{data.ticker}</h2>
-        <span className="text-sm text-muted-foreground font-medium">{data.name}</span>
+        {data.name && data.name !== data.ticker && (
+          <span className="text-sm text-muted-foreground font-medium">{data.name}</span>
+        )}
       </div>
       <div className="flex items-center gap-2 mb-6">
         <span className="text-3xl font-bold">${data.price.toFixed(2)}</span>

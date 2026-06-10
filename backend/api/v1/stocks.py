@@ -32,6 +32,38 @@ _PERIODS_MAP = {
     "ALL": ("5y", "1mo"),
 }
 
+_NAME_TTL = 7 * 24 * 60 * 60  # company names rarely change — cache a week
+
+
+def _company_name(ticker: str, info: dict, cache: CacheManager) -> str:
+    """
+    Resolve a human-readable company name resiliently.
+
+    .info is rate-limited and often empty, which would leave us showing the
+    ticker twice ("TSLA TSLA"). So: try .info, then a cached value, then the
+    Yahoo search endpoint (far less throttled), caching any real name we find.
+    """
+    name = info.get("longName") or info.get("shortName")
+    if name and name != ticker:
+        cache.set_raw(f"stockname:{ticker}", name, ttl=_NAME_TTL)
+        return name
+
+    cached = cache.get_raw(f"stockname:{ticker}")
+    if cached:
+        return cached
+
+    try:
+        for q in (yf.Search(ticker).quotes or []):
+            if q.get("symbol", "").upper() == ticker:
+                nm = q.get("longname") or q.get("shortname")
+                if nm:
+                    cache.set_raw(f"stockname:{ticker}", nm, ttl=_NAME_TTL)
+                    return nm
+    except Exception as e:
+        logger.warning("company-name lookup via search failed for %s: %s", ticker, e)
+
+    return ticker
+
 
 @router.get("/stocks/{ticker}/chart")
 async def get_stock_chart(ticker: str):
@@ -101,7 +133,7 @@ async def get_stock_chart(ticker: str):
     prev_close = prev_close or current_price
     change = current_price - prev_close
     change_pct = (change / prev_close * 100) if prev_close else 0.0
-    name = info.get("longName") or info.get("shortName") or ticker
+    name = _company_name(ticker, info, cache)
 
     return {
         "ticker": ticker,
