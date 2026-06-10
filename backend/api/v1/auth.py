@@ -103,6 +103,13 @@ async def login(body: AuthRequest):
         logger.warning("login transport error for %s: %s", body.email, e)
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=_AUTH_UNAVAILABLE)
     except Exception as e:
+        # An unconfirmed email is not a credential error — tell the user to
+        # confirm instead of sending them to reset a password that's fine.
+        if getattr(e, "code", None) == "email_not_confirmed":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Please confirm your email address first — check your inbox for the confirmation link.",
+            )
         logger.info("login failed for %s: %s", body.email, e)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
