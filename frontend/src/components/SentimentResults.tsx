@@ -12,6 +12,14 @@ export interface SentimentData {
   grade?: string;
   weighted_score?: number;
   ai_summary?: string;
+  article_count?: number;
+  sources?: Source[];
+}
+
+export interface Source {
+  source: string;
+  title: string;
+  url: string;
 }
 
 interface SentimentResultsProps {

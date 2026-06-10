@@ -5,6 +5,7 @@ import { SentimentResults, type SentimentData } from "@/components/SentimentResu
 import { StockChart, type StockChartData } from "@/components/StockChart";
 import { WatchlistSidebar } from "@/components/WatchlistSidebar";
 import { AISummary } from "@/components/AISummary";
+import { SourcesList } from "@/components/SourcesList";
 import { BarChart3, AlertCircle } from "lucide-react";
 import { API_BASE } from "@/lib/api";
 import { normalizeTicker, isValidTickerShape } from "@/lib/ticker";
@@ -314,6 +315,9 @@ const Index = () => {
                   <>
                     <SentimentResults data={sentimentData} ticker={activeTicker} />
                     {aiSummary && <AISummary summary={aiSummary} ticker={activeTicker} />}
+                    {sentimentData.sources && sentimentData.sources.length > 0 && (
+                      <SourcesList sources={sentimentData.sources} />
+                    )}
                   </>
                 )}
             </div>

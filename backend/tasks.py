@@ -34,6 +34,29 @@ def _publish_failure(db, task_id: str, exc: Exception) -> None:
     db.publish_log(task_id, FAILURE_SENTINEL)
 
 
+def _collect_sources(reddit_posts, yahoo_articles, limit: int = 25) -> list[dict]:
+    """
+    Flatten scraped Reddit/Yahoo items into a compact, de-duplicated source list
+    [{source, title, url}] so the UI can show what the grade was based on.
+    """
+    sources: list[dict] = []
+    seen: set[str] = set()
+    for items, src in ((reddit_posts or [], "reddit"), (yahoo_articles or [], "yahoo")):
+        for item in items:
+            url = (item or {}).get("url")
+            if not url or url in seen:
+                continue
+            seen.add(url)
+            sources.append({
+                "source": src,
+                "title": ((item.get("title") or "").strip())[:200],
+                "url": url,
+            })
+            if len(sources) >= limit:
+                return sources
+    return sources
+
+
 @broker.task
 async def analyze_sentiment_task(ticker: str, context: Context = TaskiqDepends()):
     # Lazy-import heavy modules so they only load when a task actually runs
@@ -97,6 +120,8 @@ async def analyze_sentiment_task(ticker: str, context: Context = TaskiqDepends()
         score["ai_summary"] = ai_summary
         # Record how many articles were analyzed so the client can detect "no data".
         score["article_count"] = score.get("positive", 0) + score.get("negative", 0) + score.get("neutral", 0)
+        # The actual sources behind the grade (shown in the UI for transparency).
+        score["sources"] = _collect_sources(reddit_posts, yahoo_articles)
 
         # 6. Save to Supabase (by task_id with ticker) AND Cache (by ticker with TTL)
         db.publish_log(task_id, f'{{"step": "saving", "message": "Analysis complete. Caching results..."}}')

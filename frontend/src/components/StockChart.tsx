@@ -16,7 +16,7 @@ export interface StockChartData {
   history: Record<string, PricePoint[]>;
 }
 
-const PERIODS = ["1D", "1W", "1M", "1Y", "ALL"] as const;
+const PERIODS = ["1D", "1M", "6M", "YTD", "1Y", "5Y", "10Y"] as const;
 
 interface StockChartProps {
   data: StockChartData | null;

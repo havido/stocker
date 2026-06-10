@@ -27,22 +27,37 @@ def _finite(x, default: float = 0.0) -> float:
         return default
     return v if math.isfinite(v) else default
 
-# TTLs per period (seconds)
-_PERIOD_TTL = {
-    "1D": 5 * 60,       # 5 minutes
-    "1W": 60 * 60,      # 1 hour
-    "1M": 60 * 60,      # 1 hour
-    "1Y": 24 * 60 * 60, # 24 hours
-    "ALL": 24 * 60 * 60,
-}
-
+# Periods exposed to the client (matches the product spec). Each maps to a
+# (yfinance period, interval) pair.
 _PERIODS_MAP = {
     "1D": ("1d", "5m"),
-    "1W": ("5d", "1h"),
     "1M": ("1mo", "1d"),
+    "6M": ("6mo", "1d"),
+    "YTD": ("ytd", "1d"),
     "1Y": ("1y", "1wk"),
-    "ALL": ("5y", "1mo"),
+    "5Y": ("5y", "1mo"),
+    "10Y": ("10y", "1mo"),
 }
+
+# TTLs per period (seconds) — shorter ranges change more often.
+_PERIOD_TTL = {
+    "1D": 5 * 60,            # 5 minutes
+    "1M": 60 * 60,           # 1 hour
+    "6M": 6 * 60 * 60,       # 6 hours
+    "YTD": 6 * 60 * 60,      # 6 hours
+    "1Y": 24 * 60 * 60,      # 24 hours
+    "5Y": 24 * 60 * 60,      # 24 hours
+    "10Y": 24 * 60 * 60,     # 24 hours
+}
+
+
+def _label_fmt(period_key: str) -> str:
+    """X-axis label format per period. Long ranges include the year."""
+    if period_key == "1D":
+        return "%H:%M"
+    if period_key in ("5Y", "10Y"):
+        return "%b %Y"
+    return "%m/%d"
 
 _NAME_TTL = 7 * 24 * 60 * 60  # company names rarely change — cache a week
 
@@ -116,7 +131,7 @@ async def get_stock_chart(ticker: str):
 
             try:
                 hist = stock.history(period=period, interval=interval)
-                fmt = "%H:%M" if period_key == "1D" else "%m/%d"
+                fmt = _label_fmt(period_key)
                 points = []
                 for idx, row in hist.iterrows():
                     close = row["Close"]
