@@ -80,10 +80,10 @@ async def analyze_sentiment_task(ticker: str, context: Context = TaskiqDepends()
         db.publish_log(task_id, f'{{"step": "sentiment", "message": "Starting FinBERT sentiment analysis..."}}')
         score = sentiment.analyze(text, log_callback=log_cb)
 
-        # 4. Gemini AI Summary (non-fatal — a missing summary shouldn't fail the job)
+        # 4. AI Summary (non-fatal — a missing summary shouldn't fail the job)
         ai_summary = ""
         try:
-            from services.gemini_summarizer import generate_summary
+            from services.ai_summarizer import generate_summary
             ai_summary = generate_summary(
                 ticker=ticker,
                 sentiment_summary=score,
@@ -91,7 +91,7 @@ async def analyze_sentiment_task(ticker: str, context: Context = TaskiqDepends()
                 log_callback=log_cb,
             )
         except Exception as e:
-            db.publish_log(task_id, f'{{"step": "gemini", "message": "AI summary skipped: {e}"}}')
+            db.publish_log(task_id, f'{{"step": "summary", "message": "AI summary skipped: {e}"}}')
 
         # 5. Build final result
         score["ai_summary"] = ai_summary

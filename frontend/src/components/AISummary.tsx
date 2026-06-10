@@ -84,7 +84,7 @@ export function AISummary({ summary, ticker }: AISummaryProps) {
         <div className="flex items-center gap-1.5 mt-5 pt-3 border-t border-border/50">
           <Sparkles className="h-3 w-3 text-muted-foreground" />
           <span className="text-[11px] text-muted-foreground">
-            Powered by Gemini 2.0 Flash
+            Powered by Llama 3.3 · Groq
           </span>
         </div>
       </div>

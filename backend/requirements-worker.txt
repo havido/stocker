@@ -9,4 +9,4 @@ transformers>=4.36
 torch>=2.1
 yfinance>=0.2.36
 supabase>=2.0
-google-generativeai>=0.8
+# AI summary uses Groq's OpenAI-compatible API, called via `requests` (above).

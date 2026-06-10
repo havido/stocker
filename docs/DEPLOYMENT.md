@@ -21,7 +21,7 @@ tracked template.
 | `SUPABASE_KEY` | Supabase anon/public key | API (auth) |
 | `SUPABASE_SERVICE_KEY` | Supabase service_role key (server-only) | API + Worker (DB writes) |
 | `REDIS_URL` | Upstash (`rediss://…`, TLS) | API + Worker (queue, pub/sub, cache) |
-| `GEMINI_API_KEY` | Google AI Studio | Worker (AI summary) |
+| `GROQ_API_KEY` | console.groq.com (free tier) | Worker (AI summary) |
 | `ALLOWED_ORIGINS` | Your Vercel URL (after step 5) | API (CORS) |
 | `VITE_API_URL` | Your Render URL (after step 3) | Frontend (build-time) |
 
@@ -84,7 +84,7 @@ tracked template.
 2. **Start command:** none required — `Dockerfile.api` already runs
    `uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}`, and Render injects `PORT`.
 3. **Environment variables:** add `SUPABASE_URL`, `SUPABASE_KEY`, `SUPABASE_SERVICE_KEY`,
-   `REDIS_URL`, `GEMINI_API_KEY`, and (after step 5) `ALLOWED_ORIGINS`. Do **not** upload `.env`.
+   `REDIS_URL`, `GROQ_API_KEY`, and (after step 5) `ALLOWED_ORIGINS`. Do **not** upload `.env`.
 4. **Health check path:** `/health` (the app serves `GET`/`HEAD /health`, matching Render's
    HEAD probes).
 5. **Instance size:** the API is lightweight — `requirements-api.txt` excludes torch/ML deps,
@@ -151,7 +151,7 @@ tracked template.
    `taskiq worker tasks:broker --max-async-tasks 1` so multiple FinBERT batches never load at
    once.
 7. **Networking:** the worker only makes **outbound** connections (Upstash, Supabase,
-   Reddit/Yahoo, Gemini). No inbound firewall rules needed — leave default-deny ingress.
+   Reddit/Yahoo, Groq). No inbound firewall rules needed — leave default-deny ingress.
 
 ---
 
@@ -179,7 +179,7 @@ tracked template.
 3. Search `AAPL`:
    - chart loads from `/v1/stocks/AAPL/chart`
    - SSE log lines stream (`Scraping Reddit…` → `FinBERT…` → done)
-   - sentiment + Gemini summary render
+   - sentiment + AI summary render
 4. **Negative paths** (these exercise the hardening fixes):
    - bad login → clear error toast (no silent form-clear)
    - junk ticker `ASDFGH` → `400` + inline message (not a hung spinner)
@@ -197,7 +197,7 @@ SUPABASE_URL=https://<project>.supabase.co
 SUPABASE_KEY=<anon-public-key>
 SUPABASE_SERVICE_KEY=<service-role-key>
 REDIS_URL=rediss://default:<password>@<host>:<port>
-GEMINI_API_KEY=<google-ai-studio-key>
+GROQ_API_KEY=<groq-api-key>            # free key from console.groq.com
 ALLOWED_ORIGINS=https://<your-app>.vercel.app   # API CORS allowlist
 PREWARM_ON_STARTUP=false                         # popular-ticker pre-warm (off by default)
 
